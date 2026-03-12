@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -28,8 +29,29 @@ function makeTmpDir(
 ): Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem | Scope.Scope> {
   return Effect.acquireRelease(
     Effect.sync(() => {
-      const tempRoot = path.parse(process.cwd()).root || tmpdir();
-      return mkdtempSync(path.join(tempRoot, prefix));
+      const candidateRoots = [tmpdir()];
+      const driveRoot = path.parse(process.cwd()).root;
+      if (process.platform === "win32" && driveRoot && driveRoot !== tmpdir()) {
+        candidateRoots.push(driveRoot);
+      }
+
+      for (const candidateRoot of candidateRoots) {
+        const dir = mkdtempSync(path.join(candidateRoot, prefix));
+        try {
+          const topLevel = execFileSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+          }).trim();
+          if (topLevel.length === 0) {
+            return dir;
+          }
+        } catch {
+          return dir;
+        }
+        rmSync(dir, { recursive: true, force: true });
+      }
+
+      return mkdtempSync(path.join(tmpdir(), prefix));
     }),
     (dir) =>
       Effect.sync(() => {
