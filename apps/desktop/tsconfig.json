@@ -2,8 +2,18 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
+    "baseUrl": ".",
     "types": ["node", "electron"],
-    "lib": ["ES2023", "DOM", "esnext.disposable"]
+    "lib": ["ES2023", "DOM", "esnext.disposable"],
+    "paths": {
+      "@studio/contracts": ["../../packages/contracts/src/index.ts"],
+      "@studio/shared/*": ["../../packages/shared/src/*"]
+    }
   },
-  "include": ["src", "tsdown.config.ts"]
+  "include": [
+    "src",
+    "tsdown.config.ts",
+    "../../packages/shared/src",
+    "../../packages/contracts/src"
+  ]
 }

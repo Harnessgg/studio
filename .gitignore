@@ -12,7 +12,7 @@ packages/*/dist
 build/
 .logs/
 release/
-.t3
+.harnessgg/studio
 apps/web/.playwright
 apps/web/playwright-report
 apps/web/src/components/__screenshots__

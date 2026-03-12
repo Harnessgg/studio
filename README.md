@@ -1,29 +1,20 @@
 # Studio by HarnessGG
 
-Studio by HarnessGG is a local desktop app for AI-assisted video editing.
+Studio by HarnessGG is a desktop app for AI-assisted video editing with Codex.
 
-It gives Codex a project workspace for assembling edits, reviewing cuts, and rendering output, while `harnessgg-kdenlive` and Kdenlive do the actual timeline work underneath.
+It gives the agent a local project workspace, a structured project scaffold, and a visual control surface for reviewing media, previewing exports, leaving timestamped feedback, and iterating on the same edit thread. Timeline work is handled locally through `harnessgg-kdenlive` and Kdenlive.
 
-## What it is
+## What it does
 
-- Desktop shell: Electron
-- App UI: React
-- Runtime: local Node/Bun server plus WebSocket-backed desktop bridge
-- Editing engine: `harnessgg-kdenlive`
-- Primary use case: natural-language video editing against a local project folder
+- Chat with Codex about a video edit in plain English
+- Inspect local media, outputs, and project instructions from the app
+- Preview the latest export or any selected source clip
+- Leave timeline comments tied to file paths and timestamps
+- Keep editing state, exports, logs, and temp files inside the project folder
 
-Studio is built on top of the same HarnessGG tooling stack documented at `harness.gg`. The UI is a visual control surface for local creative workflows, not a separate cloud editing backend.
+## Project layout
 
-## Current scope
-
-The app is focused on a local-first editing flow:
-
-- add or open a local project folder
-- chat with Codex about the edit you want
-- inspect project media and `STYLE.md`
-- preview outputs and iterate on the same thread
-
-Project folders are expected to use the Studio scaffold:
+Studio expects a local project folder that looks like this:
 
 ```text
 my-project/
@@ -36,6 +27,17 @@ my-project/
     tmp/
 ```
 
+`STYLE.md` holds project-specific editing defaults. `AGENTS.md` defines the run contract and workspace rules for Codex. `.harnessgg/exports` stores finished outputs, `.harnessgg/logs` stores run logs, and `.harnessgg/tmp` is reserved for intermediate files.
+
+## How to use
+
+1. Install the local dependencies listed below.
+2. Start the desktop app.
+3. Open or create a Studio project folder.
+4. Add media files to the project workspace.
+5. Ask Codex to assemble or revise the edit.
+6. Review the preview, leave timeline comments, and send feedback back to the agent.
+
 ## Prerequisites
 
 For real editing runs, install these locally:
@@ -46,7 +48,7 @@ For real editing runs, install these locally:
 - Python
 - `harnessgg-kdenlive`
 
-On Windows, do not assume Kdenlive is on `PATH`. Studio and the agent may need to resolve it from an installed location such as `C:\Program Files\kdenlive\`.
+On Windows, Kdenlive may not be on `PATH`. If needed, point the tooling at an installed location such as `C:\Program Files\kdenlive\`.
 
 ## Development
 
@@ -76,7 +78,7 @@ bun run build:desktop
 
 ## Quality checks
 
-Before shipping or committing changes, this repo expects:
+Before shipping changes, run:
 
 ```bash
 bun fmt
@@ -91,9 +93,9 @@ bun run test
 bun run test:desktop-smoke
 ```
 
-## Release flow
+## Release builds
 
-Local artifact builds:
+Build local desktop artifacts with:
 
 ```bash
 bun run dist:desktop:artifact
@@ -102,38 +104,35 @@ bun run dist:desktop:dmg
 bun run dist:desktop:linux
 ```
 
-GitHub Actions:
+GitHub Actions handles CI validation and desktop release packaging on tagged versions.
 
-- `CI` runs format, lint, typecheck, tests, browser tests, and desktop build verification
-- `Release Desktop` publishes signed or unsigned desktop artifacts on version tags like `v1.2.3`
+## Some notes
+
+- This repo is still early-stage and Codex-first.
+- The server runs `codex app-server` per provider session and streams structured events into the desktop UI over WebSocket.
+- `packages/contracts` stays schema-only.
+- `packages/shared` is for shared runtime logic used by both server and web.
+- Predictable behavior under reconnects, partial streams, and failed runs matters more than short-term convenience.
 
 ## Architecture
 
-Top-level packages:
+- `apps/desktop`: Electron shell, preload bridge, desktop boot flow
+- `apps/server`: local orchestration server, Codex app-server integration, workspace inspection
+- `apps/web`: React UI for chat, preview, timeline comments, and project controls
+- `packages/contracts`: shared schemas and protocol contracts
+- `packages/shared`: shared runtime utilities
+- `scripts`: build, release, and local development helpers
 
-- `apps/desktop`
-  - Electron main process, preload bridge, desktop launch scripts
-- `apps/server`
-  - local orchestration server, Codex app-server integration, workspace inspection, persistence
-- `apps/web`
-  - Studio UI, thread view, preview surface, media browser, chat experience
-- `packages/contracts`
-  - shared schemas and protocol contracts
-- `packages/shared`
-  - shared runtime utilities
+## Contributing
 
-## Studio-specific behavior
+This codebase is moving quickly, so pragmatic structural improvements are welcome. If you add functionality, prefer extracting shared logic instead of duplicating local behavior in multiple surfaces.
 
-- Every project gets a default `STYLE.md` and `AGENTS.md`
-- Studio scaffolds `.harnessgg/exports`, `.harnessgg/logs`, and `.harnessgg/tmp`
-- The agent receives project context, style-guide guidance, and embedded HarnessGG editing rules
-- The UI keeps editing local to the machine and project folder
+Before opening a change, make sure formatting, linting, and typechecking all pass locally.
 
-## Related HarnessGG docs
+## Related links
 
-- `https://harness.gg/studio`
-- `https://harness.gg/kdenlive`
-- `https://github.com/harnessgg`
+- [HarnessGG](https://harness.gg/)
+- [HarnessGG on GitHub](https://github.com/harnessgg)
 
 ## License
 

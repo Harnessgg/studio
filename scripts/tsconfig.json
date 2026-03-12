@@ -2,15 +2,20 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
+    "baseUrl": ".",
     "types": ["node", "bun"],
     "lib": ["ES2023", "esnext.disposable"],
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    "paths": {
+      "@studio/contracts": ["../packages/contracts/src/index.ts"],
+      "@studio/shared/*": ["../packages/shared/src/*"]
+    },
     "plugins": [
       {
         "name": "@effect/language-service"
       }
     ]
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts", "../packages/shared/src", "../packages/contracts/src"]
 }

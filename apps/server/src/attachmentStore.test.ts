@@ -44,7 +44,7 @@ describe("attachmentStore", () => {
   });
 
   it("resolves attachment path by id using the extension that exists on disk", () => {
-    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-attachment-store-"));
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "studio-attachment-store-"));
     try {
       const attachmentId = "thread-1-attachment";
       const attachmentsDir = path.join(stateDir, "attachments");
@@ -63,7 +63,7 @@ describe("attachmentStore", () => {
   });
 
   it("returns null when no attachment file exists for the id", () => {
-    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3code-attachment-store-"));
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "studio-attachment-store-"));
     try {
       const resolved = resolveAttachmentPathById({
         stateDir,

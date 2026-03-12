@@ -1,4 +1,4 @@
-import { EDITORS, type EditorId } from "@t3tools/contracts";
+import { EDITORS, type EditorId } from "@studio/contracts";
 import { isMacPlatform } from "./lib/utils";
 import { LAST_EDITOR_STORAGE_KEY } from "./storageKeys";
 

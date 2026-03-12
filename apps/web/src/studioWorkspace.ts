@@ -1,4 +1,4 @@
-import type { ProjectEntry } from "@t3tools/contracts";
+import type { ProjectEntry } from "@studio/contracts";
 
 export type WorkspacePreviewKind = "video" | "audio" | "image" | "document" | "other";
 

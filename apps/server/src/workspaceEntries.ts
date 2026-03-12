@@ -13,7 +13,7 @@ import {
   ProjectSearchEntriesResult,
   type ProjectWorkspaceInspectInput,
   type ProjectWorkspaceInspectResult,
-} from "@t3tools/contracts";
+} from "@studio/contracts";
 
 const WORKSPACE_CACHE_TTL_MS = 15_000;
 const WORKSPACE_CACHE_MAX_KEYS = 4;

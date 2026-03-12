@@ -7,7 +7,7 @@
  *
  * @module ProviderAdapterRegistry
  */
-import type { ProviderKind } from "@t3tools/contracts";
+import type { ProviderKind } from "@studio/contracts";
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 
@@ -37,6 +37,6 @@ export interface ProviderAdapterRegistryShape {
 export class ProviderAdapterRegistry extends ServiceMap.Service<
   ProviderAdapterRegistry,
   ProviderAdapterRegistryShape
->()("t3/provider/Services/ProviderAdapterRegistry") {}
+>()("@studio/server/provider/Services/ProviderAdapterRegistry") {}
 
 // Dummy comment for workflow testing.

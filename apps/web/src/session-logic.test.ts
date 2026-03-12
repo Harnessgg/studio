@@ -1,4 +1,4 @@
-import { EventId, MessageId, TurnId, type OrchestrationThreadActivity } from "@t3tools/contracts";
+import { EventId, MessageId, TurnId, type OrchestrationThreadActivity } from "@studio/contracts";
 import { describe, expect, it } from "vitest";
 
 import {

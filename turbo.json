@@ -5,13 +5,13 @@
     "VITE_WS_URL",
     "VITE_DEV_SERVER_URL",
     "ELECTRON_RENDERER_PORT",
-    "T3CODE_LOG_WS_EVENTS",
-    "T3CODE_MODE",
-    "T3CODE_PORT",
-    "T3CODE_NO_BROWSER",
-    "T3CODE_STATE_DIR",
-    "T3CODE_AUTH_TOKEN",
-    "T3CODE_DESKTOP_WS_URL"
+    "STUDIO_LOG_WS_EVENTS",
+    "STUDIO_MODE",
+    "STUDIO_PORT",
+    "STUDIO_NO_BROWSER",
+    "STUDIO_STATE_DIR",
+    "STUDIO_AUTH_TOKEN",
+    "STUDIO_DESKTOP_WS_URL"
   ],
   "tasks": {
     "build": {
@@ -19,7 +19,7 @@
       "outputs": ["dist/**", "dist-electron/**"]
     },
     "dev": {
-      "dependsOn": ["@t3tools/contracts#build"],
+      "dependsOn": ["@studio/contracts#build"],
       "cache": false,
       "persistent": true
     },

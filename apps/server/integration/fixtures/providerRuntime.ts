@@ -1,4 +1,4 @@
-import { EventId, RuntimeRequestId } from "@t3tools/contracts";
+import { EventId, RuntimeRequestId } from "@studio/contracts";
 import type { LegacyProviderRuntimeEvent } from "../TestProviderAdapter.integration.ts";
 
 const PROVIDER = "codex" as const;

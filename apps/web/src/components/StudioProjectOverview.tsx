@@ -6,7 +6,7 @@ import {
   MusicIcon,
   PlayCircleIcon,
 } from "lucide-react";
-import type { ThreadId } from "@t3tools/contracts";
+import type { ThreadId } from "@studio/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ComponentType } from "react";
 

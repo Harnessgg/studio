@@ -8,7 +8,7 @@ import {
   ApprovalRequestId,
   type OrchestrationEvent,
   type OrchestrationThread,
-} from "@t3tools/contracts";
+} from "@studio/contracts";
 import {
   Effect,
   Exit,
@@ -230,7 +230,7 @@ export const makeOrchestrationIntegrationHarness = (
           listProviders: () => Effect.succeed([adapterHarness.provider]),
         } as typeof ProviderAdapterRegistry.Service)
       : null;
-    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-orchestration-integration-"));
+    const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "studio-orchestration-integration-"));
     const workspaceDir = path.join(rootDir, "workspace");
     const stateDir = path.join(rootDir, "state");
     const dbPath = path.join(stateDir, "state.sqlite");
