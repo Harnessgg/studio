@@ -18,6 +18,16 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
+const GIT_ENV_KEYS_TO_CLEAR = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_NAMESPACE",
+  "GIT_CEILING_DIRECTORIES",
+] as const;
 
 function quoteGitCommand(args: ReadonlyArray<string>): string {
   return `git ${args.join(" ")}`;
@@ -37,6 +47,22 @@ function toGitCommandError(
           detail: `${cause instanceof Error && cause.message.length > 0 ? cause.message : "Unknown error"} - ${detail}`,
           ...(cause !== undefined ? { cause } : {}),
         });
+}
+
+function createSanitizedGitEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...overrides,
+  };
+
+  for (const key of GIT_ENV_KEYS_TO_CLEAR) {
+    if (overrides && Object.prototype.hasOwnProperty.call(overrides, key)) {
+      continue;
+    }
+    delete env[key];
+  }
+
+  return env;
 }
 
 const collectOutput = Effect.fn(function* <E>(
@@ -83,7 +109,7 @@ const makeGitService = Effect.gen(function* () {
         .spawn(
           ChildProcess.make("git", commandInput.args, {
             cwd: commandInput.cwd,
-            ...(input.env ? { env: input.env } : {}),
+            env: createSanitizedGitEnv(input.env),
           }),
         )
         .pipe(Effect.mapError(toGitCommandError(commandInput, "failed to spawn.")));
