@@ -4,6 +4,7 @@ import { assertFailure } from "@effect/vitest/utils";
 
 import { Effect, Layer, Stream } from "effect";
 
+import { ClaudeAdapter, ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { CodexAdapter, CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderAdapterRegistryLive } from "./ProviderAdapterRegistry.ts";
@@ -27,9 +28,20 @@ const fakeCodexAdapter: CodexAdapterShape = {
   streamEvents: Stream.empty,
 };
 
+const fakeClaudeAdapter: ClaudeAdapterShape = {
+  ...fakeCodexAdapter,
+  provider: "claudeCode",
+};
+
 const layer = it.layer(
   Layer.mergeAll(
-    Layer.provide(ProviderAdapterRegistryLive, Layer.succeed(CodexAdapter, fakeCodexAdapter)),
+    Layer.provide(
+      ProviderAdapterRegistryLive,
+      Layer.mergeAll(
+        Layer.succeed(CodexAdapter, fakeCodexAdapter),
+        Layer.succeed(ClaudeAdapter, fakeClaudeAdapter),
+      ),
+    ),
     NodeServices.layer,
   ),
 );
@@ -40,9 +52,11 @@ layer("ProviderAdapterRegistryLive", (it) => {
       const registry = yield* ProviderAdapterRegistry;
       const codex = yield* registry.getByProvider("codex");
       assert.equal(codex, fakeCodexAdapter);
+      const claude = yield* registry.getByProvider("claudeCode");
+      assert.equal(claude, fakeClaudeAdapter);
 
       const providers = yield* registry.listProviders();
-      assert.deepEqual(providers, ["codex"]);
+      assert.deepEqual(providers, ["codex", "claudeCode"]);
     }),
   );
 

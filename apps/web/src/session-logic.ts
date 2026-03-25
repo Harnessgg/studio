@@ -16,7 +16,7 @@ import type {
   TurnDiffSummary,
 } from "./types";
 
-export type ProviderPickerKind = ProviderKind | "claudeCode" | "cursor";
+export type ProviderPickerKind = ProviderKind | "cursor";
 
 export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
@@ -24,7 +24,7 @@ export const PROVIDER_OPTIONS: Array<{
   available: boolean;
 }> = [
   { value: "codex", label: "Codex", available: true },
-  { value: "claudeCode", label: "Claude Code", available: false },
+  { value: "claudeCode", label: "Claude Code", available: true },
   { value: "cursor", label: "Cursor", available: false },
 ];
 

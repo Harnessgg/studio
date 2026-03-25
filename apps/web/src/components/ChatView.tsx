@@ -1,10 +1,11 @@
 import {
   type ApprovalRequestId,
+  type ClaudeCodeEffort,
+  type CodexReasoningEffort,
   DEFAULT_MODEL_BY_PROVIDER,
   EDITORS,
   type EditorId,
   type KeybindingCommand,
-  type CodexReasoningEffort,
   type MessageId,
   type ProjectId,
   type ProjectEntry,
@@ -16,6 +17,7 @@ import {
   type ProviderApprovalDecision,
   type ServerProviderStatus,
   type ProviderKind,
+  type ProviderReasoningEffort,
   type ThreadId,
   type TurnId,
   OrchestrationThreadActivity,
@@ -972,7 +974,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProvider,
     activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
   );
-  const customModelsForSelectedProvider = settings.customCodexModels;
+  const customModelsForSelectedProvider = getCustomModelsForProvider(settings, selectedProvider);
   const selectedModel = useMemo(() => {
     const draftModel = composerDraft.model;
     if (!draftModel) {
@@ -986,30 +988,58 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [baseThreadModel, composerDraft.model, customModelsForSelectedProvider, selectedProvider]);
   const reasoningOptions = getReasoningEffortOptions(selectedProvider);
   const supportsReasoningEffort = reasoningOptions.length > 0;
-  const selectedEffort = composerDraft.effort ?? getDefaultReasoningEffort(selectedProvider);
+  const selectedEffort = useMemo(() => {
+    if (composerDraft.effort && reasoningOptions.includes(composerDraft.effort)) {
+      return composerDraft.effort;
+    }
+    return getDefaultReasoningEffort(selectedProvider);
+  }, [composerDraft.effort, reasoningOptions, selectedProvider]);
   const selectedCodexFastModeEnabled =
     selectedProvider === "codex" ? composerDraft.codexFastMode : false;
   const selectedModelOptionsForDispatch = useMemo(() => {
-    if (selectedProvider !== "codex") {
+    if (selectedProvider === "codex") {
+      const codexOptions = {
+        ...(supportsReasoningEffort && selectedEffort
+          ? { reasoningEffort: selectedEffort as CodexReasoningEffort }
+          : {}),
+        ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
+      };
+      return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
+    }
+
+    if (selectedProvider === "claudeCode") {
+      if (supportsReasoningEffort && selectedEffort) {
+        return {
+          claudeCode: {
+            effort: selectedEffort as ClaudeCodeEffort,
+          },
+        };
+      }
       return undefined;
     }
-    const codexOptions = {
-      ...(supportsReasoningEffort && selectedEffort ? { reasoningEffort: selectedEffort } : {}),
-      ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
-    };
-    return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
+
+    return undefined;
   }, [selectedCodexFastModeEnabled, selectedEffort, selectedProvider, supportsReasoningEffort]);
   const providerOptionsForDispatch = useMemo(() => {
-    if (!settings.codexBinaryPath && !settings.codexHomePath) {
+    const codexOptions =
+      settings.codexBinaryPath || settings.codexHomePath
+        ? {
+            ...(settings.codexBinaryPath ? { binaryPath: settings.codexBinaryPath } : {}),
+            ...(settings.codexHomePath ? { homePath: settings.codexHomePath } : {}),
+          }
+        : undefined;
+    const claudeOptions = settings.claudeBinaryPath
+      ? { binaryPath: settings.claudeBinaryPath }
+      : undefined;
+
+    if (!codexOptions && !claudeOptions) {
       return undefined;
     }
     return {
-      codex: {
-        ...(settings.codexBinaryPath ? { binaryPath: settings.codexBinaryPath } : {}),
-        ...(settings.codexHomePath ? { homePath: settings.codexHomePath } : {}),
-      },
+      ...(codexOptions ? { codex: codexOptions } : {}),
+      ...(claudeOptions ? { claudeCode: claudeOptions } : {}),
     };
-  }, [settings.codexBinaryPath, settings.codexHomePath]);
+  }, [settings.claudeBinaryPath, settings.codexBinaryPath, settings.codexHomePath]);
   const selectedModelForPicker = selectedModel;
   const modelOptionsByProvider = useMemo(
     () => getCustomModelOptionsByProvider(settings),
@@ -1477,7 +1507,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const _availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
   const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
-  const activeProvider = activeThread?.session?.provider ?? "codex";
+  const activeProvider = activeThread?.session?.provider ?? selectedProvider;
   const activeProviderStatus = useMemo(
     () => providerStatuses.find((status) => status.provider === activeProvider) ?? null,
     [activeProvider, providerStatuses],
@@ -3532,7 +3562,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setComposerDraftProvider(activeThread.id, provider);
       setComposerDraftModel(
         activeThread.id,
-        resolveAppModelSelection(provider, settings.customCodexModels, model),
+        resolveAppModelSelection(provider, getCustomModelsForProvider(settings, provider), model),
       );
       scheduleComposerFocus();
     },
@@ -3542,11 +3572,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       scheduleComposerFocus,
       setComposerDraftModel,
       setComposerDraftProvider,
-      settings.customCodexModels,
+      settings,
     ],
   );
   const onEffortSelect = useCallback(
-    (effort: CodexReasoningEffort) => {
+    (effort: ProviderReasoningEffort) => {
       setComposerDraftEffort(threadId, effort);
       scheduleComposerFocus();
     },
@@ -4355,13 +4385,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         />
                       ) : (
                         <>
-                          {selectedProvider === "codex" && selectedEffort != null ? (
+                          {selectedEffort != null ? (
                             <>
                               <Separator
                                 orientation="vertical"
                                 className="mx-0.5 hidden h-4 sm:block"
                               />
                               <CodexTraitsPicker
+                                provider={selectedProvider}
                                 effort={selectedEffort}
                                 fastModeEnabled={selectedCodexFastModeEnabled}
                                 options={reasoningOptions}
@@ -6293,7 +6324,7 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
   label: string;
   available: true;
 } {
-  return option.available && option.value !== "claudeCode";
+  return option.available && option.value !== "cursor";
 }
 
 const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
@@ -6303,12 +6334,47 @@ const COMING_SOON_PROVIDER_OPTIONS = [
   { id: "gemini", label: "Gemini", icon: Gemini },
 ] as const;
 
+function reasoningEffortLabel(effort: ProviderReasoningEffort): string {
+  switch (effort) {
+    case "xhigh":
+      return "Extra High";
+    case "ultrathink":
+      return "Ultrathink";
+    case "max":
+      return "Max";
+    case "high":
+      return "High";
+    case "medium":
+      return "Medium";
+    case "low":
+      return "Low";
+  }
+}
+
 function getCustomModelOptionsByProvider(settings: {
   customCodexModels: readonly string[];
+  customClaudeModels: readonly string[];
 }): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
   return {
     codex: getAppModelOptions("codex", settings.customCodexModels),
+    claudeCode: getAppModelOptions("claudeCode", settings.customClaudeModels),
   };
+}
+
+function getCustomModelsForProvider(
+  settings: {
+    customCodexModels: readonly string[];
+    customClaudeModels: readonly string[];
+  },
+  provider: ProviderKind,
+): readonly string[] {
+  switch (provider) {
+    case "claudeCode":
+      return settings.customClaudeModels;
+    case "codex":
+    default:
+      return settings.customCodexModels;
+  }
 }
 
 const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
@@ -6486,23 +6552,17 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
   interactionMode: ProviderInteractionMode;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
-  selectedEffort: CodexReasoningEffort | null;
+  selectedEffort: ProviderReasoningEffort | null;
   selectedProvider: ProviderKind;
   selectedCodexFastModeEnabled: boolean;
-  reasoningOptions: ReadonlyArray<CodexReasoningEffort>;
-  onEffortSelect: (effort: CodexReasoningEffort) => void;
+  reasoningOptions: ReadonlyArray<ProviderReasoningEffort>;
+  onEffortSelect: (effort: ProviderReasoningEffort) => void;
   onCodexFastModeChange: (enabled: boolean) => void;
   onToggleInteractionMode: () => void;
   onTogglePlanSidebar: () => void;
   onToggleRuntimeMode: () => void;
 }) {
-  const defaultReasoningEffort = getDefaultReasoningEffort("codex");
-  const reasoningLabelByOption: Record<CodexReasoningEffort, string> = {
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "Extra High",
-  };
+  const defaultReasoningEffort = getDefaultReasoningEffort(props.selectedProvider);
 
   return (
     <Menu>
@@ -6519,7 +6579,7 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
         <EllipsisIcon aria-hidden="true" className="size-4" />
       </MenuTrigger>
       <MenuPopup align="start">
-        {props.selectedProvider === "codex" && props.selectedEffort != null ? (
+        {props.selectedEffort != null ? (
           <>
             <MenuGroup>
               <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning</div>
@@ -6534,12 +6594,16 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
               >
                 {props.reasoningOptions.map((effort) => (
                   <MenuRadioItem key={effort} value={effort}>
-                    {reasoningLabelByOption[effort]}
+                    {reasoningEffortLabel(effort)}
                     {effort === defaultReasoningEffort ? " (default)" : ""}
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
             </MenuGroup>
+          </>
+        ) : null}
+        {props.selectedProvider === "codex" && props.selectedEffort != null ? (
+          <>
             <MenuDivider />
             <MenuGroup>
               <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
@@ -6553,9 +6617,9 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
                 <MenuRadioItem value="on">on</MenuRadioItem>
               </MenuRadioGroup>
             </MenuGroup>
-            <MenuDivider />
           </>
         ) : null}
+        {props.selectedEffort != null ? <MenuDivider /> : null}
         <MenuGroup>
           <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
           <MenuRadioGroup
@@ -6598,23 +6662,18 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
 });
 
 const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
-  effort: CodexReasoningEffort;
+  provider: ProviderKind;
+  effort: ProviderReasoningEffort;
   fastModeEnabled: boolean;
-  options: ReadonlyArray<CodexReasoningEffort>;
-  onEffortChange: (effort: CodexReasoningEffort) => void;
+  options: ReadonlyArray<ProviderReasoningEffort>;
+  onEffortChange: (effort: ProviderReasoningEffort) => void;
   onFastModeChange: (enabled: boolean) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const defaultReasoningEffort = getDefaultReasoningEffort("codex");
-  const reasoningLabelByOption: Record<CodexReasoningEffort, string> = {
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "Extra High",
-  };
+  const defaultReasoningEffort = getDefaultReasoningEffort(props.provider);
   const triggerLabel = [
-    reasoningLabelByOption[props.effort],
-    ...(props.fastModeEnabled ? ["Fast"] : []),
+    reasoningEffortLabel(props.effort),
+    ...(props.provider === "codex" && props.fastModeEnabled ? ["Fast"] : []),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -6652,25 +6711,29 @@ const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
           >
             {props.options.map((effort) => (
               <MenuRadioItem key={effort} value={effort}>
-                {reasoningLabelByOption[effort]}
+                {reasoningEffortLabel(effort)}
                 {effort === defaultReasoningEffort ? " (default)" : ""}
               </MenuRadioItem>
             ))}
           </MenuRadioGroup>
         </MenuGroup>
-        <MenuDivider />
-        <MenuGroup>
-          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
-          <MenuRadioGroup
-            value={props.fastModeEnabled ? "on" : "off"}
-            onValueChange={(value) => {
-              props.onFastModeChange(value === "on");
-            }}
-          >
-            <MenuRadioItem value="off">off</MenuRadioItem>
-            <MenuRadioItem value="on">on</MenuRadioItem>
-          </MenuRadioGroup>
-        </MenuGroup>
+        {props.provider === "codex" ? (
+          <>
+            <MenuDivider />
+            <MenuGroup>
+              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
+              <MenuRadioGroup
+                value={props.fastModeEnabled ? "on" : "off"}
+                onValueChange={(value) => {
+                  props.onFastModeChange(value === "on");
+                }}
+              >
+                <MenuRadioItem value="off">off</MenuRadioItem>
+                <MenuRadioItem value="on">on</MenuRadioItem>
+              </MenuRadioGroup>
+            </MenuGroup>
+          </>
+        ) : null}
       </MenuPopup>
     </Menu>
   );

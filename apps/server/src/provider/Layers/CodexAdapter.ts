@@ -11,6 +11,7 @@ import {
   type CanonicalRequestType,
   type ProviderEvent,
   type ProviderRuntimeEvent,
+  type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   RuntimeItemId,
   RuntimeRequestId,
@@ -107,6 +108,59 @@ function asArray(value: unknown): unknown[] | undefined {
 
 function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeThreadTokenUsage(value: unknown): ThreadTokenUsageSnapshot | undefined {
+  const usage = asObject(value);
+  if (!usage) {
+    return undefined;
+  }
+
+  const usedTokens =
+    asNumber(usage.usedTokens) ??
+    asNumber(usage.totalTokens) ??
+    asNumber(usage.total_tokens) ??
+    asNumber(usage.lastUsedTokens);
+  if (usedTokens === undefined || usedTokens < 0) {
+    return undefined;
+  }
+
+  return {
+    usedTokens,
+    ...(asNumber(usage.maxTokens) !== undefined ? { maxTokens: asNumber(usage.maxTokens) } : {}),
+    ...(asNumber(usage.inputTokens) !== undefined
+      ? { inputTokens: asNumber(usage.inputTokens) }
+      : {}),
+    ...(asNumber(usage.cachedInputTokens) !== undefined
+      ? { cachedInputTokens: asNumber(usage.cachedInputTokens) }
+      : {}),
+    ...(asNumber(usage.outputTokens) !== undefined
+      ? { outputTokens: asNumber(usage.outputTokens) }
+      : {}),
+    ...(asNumber(usage.reasoningOutputTokens) !== undefined
+      ? { reasoningOutputTokens: asNumber(usage.reasoningOutputTokens) }
+      : {}),
+    ...(asNumber(usage.lastUsedTokens) !== undefined
+      ? { lastUsedTokens: asNumber(usage.lastUsedTokens) }
+      : {}),
+    ...(asNumber(usage.lastInputTokens) !== undefined
+      ? { lastInputTokens: asNumber(usage.lastInputTokens) }
+      : {}),
+    ...(asNumber(usage.lastCachedInputTokens) !== undefined
+      ? { lastCachedInputTokens: asNumber(usage.lastCachedInputTokens) }
+      : {}),
+    ...(asNumber(usage.lastOutputTokens) !== undefined
+      ? { lastOutputTokens: asNumber(usage.lastOutputTokens) }
+      : {}),
+    ...(asNumber(usage.lastReasoningOutputTokens) !== undefined
+      ? { lastReasoningOutputTokens: asNumber(usage.lastReasoningOutputTokens) }
+      : {}),
+    ...(asNumber(usage.toolUses) !== undefined ? { toolUses: asNumber(usage.toolUses) } : {}),
+    ...(asNumber(usage.durationMs) !== undefined ? { durationMs: asNumber(usage.durationMs) } : {}),
+    ...(typeof usage.compactsAutomatically === "boolean"
+      ? { compactsAutomatically: usage.compactsAutomatically }
+      : {}),
+  };
 }
 
 function toTurnStatus(value: unknown): "completed" | "failed" | "cancelled" | "interrupted" {
@@ -700,12 +754,16 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "thread/tokenUsage/updated") {
+    const usage = normalizeThreadTokenUsage(event.payload);
+    if (!usage) {
+      return [];
+    }
     return [
       {
         type: "thread.token-usage.updated",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
-          usage: event.payload ?? {},
+          usage,
         },
       },
     ];
