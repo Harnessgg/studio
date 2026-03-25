@@ -14,7 +14,7 @@
     },
     "apps/desktop": {
       "name": "@studio/desktop",
-      "version": "0.0.9",
+      "version": "0.1.1",
       "dependencies": {
         "effect": "catalog:",
         "electron": "40.6.0",
@@ -32,7 +32,7 @@
     },
     "apps/server": {
       "name": "@studio/server",
-      "version": "0.0.9",
+      "version": "0.1.1",
       "bin": {
         "studio": "./dist/index.mjs",
       },
@@ -61,7 +61,7 @@
     },
     "apps/web": {
       "name": "@studio/web",
-      "version": "0.0.9",
+      "version": "0.1.1",
       "dependencies": {
         "@base-ui/react": "^1.2.0",
         "@dnd-kit/core": "^6.3.1",
@@ -109,7 +109,7 @@
     },
     "packages/contracts": {
       "name": "@studio/contracts",
-      "version": "0.0.9",
+      "version": "0.1.1",
       "dependencies": {
         "effect": "catalog:",
       },
