@@ -35,9 +35,10 @@ import {
 } from "./terminal";
 import { KeybindingRule } from "./keybindings";
 import {
+  ProjectGenerateStyleGuideInput,
   ProjectSearchEntriesInput,
-  ProjectWorkspaceInspectInput,
   ProjectWriteFileInput,
+  ProjectWorkspaceInspectInput,
 } from "./project";
 import { OpenInEditorInput } from "./editor";
 import { ServerConfigUpdatedPayload } from "./server";
@@ -52,6 +53,7 @@ export const WS_METHODS = {
   projectsSearchEntries: "projects.searchEntries",
   projectsInspectWorkspace: "projects.inspectWorkspace",
   projectsWriteFile: "projects.writeFile",
+  projectsGenerateStyleGuide: "projects.generateStyleGuide",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -117,6 +119,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.projectsSearchEntries, ProjectSearchEntriesInput),
   tagRequestBody(WS_METHODS.projectsInspectWorkspace, ProjectWorkspaceInspectInput),
   tagRequestBody(WS_METHODS.projectsWriteFile, ProjectWriteFileInput),
+  tagRequestBody(WS_METHODS.projectsGenerateStyleGuide, ProjectGenerateStyleGuideInput),
 
   // Shell methods
   tagRequestBody(WS_METHODS.shellOpenInEditor, OpenInEditorInput),

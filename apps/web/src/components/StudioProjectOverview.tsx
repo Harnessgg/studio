@@ -6,21 +6,46 @@ import {
   MusicIcon,
   PlayCircleIcon,
 } from "lucide-react";
-import type { ThreadId } from "@studio/contracts";
+import type { ProjectStyleGuideSourceSummary, ThreadId } from "@studio/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type ComponentType } from "react";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { ensureNativeApi } from "../nativeApi";
 import { useStore } from "../store";
-import { projectInspectWorkspaceQueryOptions, projectQueryKeys } from "../lib/projectReactQuery";
+import {
+  generateProjectStyleGuide,
+  projectInspectWorkspaceQueryOptions,
+  projectQueryKeys,
+} from "../lib/projectReactQuery";
 import {
   buildWorkspaceFileUrl,
   resolveWorkspaceAbsolutePath,
   workspaceEntryCategoryLabel,
 } from "../studioWorkspace";
 import { Button } from "./ui/button";
+import { toastManager } from "./ui/toast";
 import { Textarea } from "./ui/textarea";
+
+const MAX_REFERENCE_VIDEO_BYTES = 32 * 1024 * 1024;
+const MAX_REFERENCE_VIDEO_BYTES_LABEL = `${Math.floor(MAX_REFERENCE_VIDEO_BYTES / (1024 * 1024))} MB`;
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("Could not read video data."));
+    });
+    reader.addEventListener("error", () => {
+      reject(reader.error ?? new Error("Failed to read video."));
+    });
+    reader.readAsDataURL(file);
+  });
+}
 
 function MetricCard(props: {
   label: string;
@@ -125,6 +150,12 @@ export default function StudioProjectOverview(props: {
   const [styleDraft, setStyleDraft] = useState("");
   const [styleDirty, setStyleDirty] = useState(false);
   const [styleEditorOpen, setStyleEditorOpen] = useState(false);
+  const [referenceUrl, setReferenceUrl] = useState("");
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [lastSourceSummary, setLastSourceSummary] = useState<ProjectStyleGuideSourceSummary | null>(
+    null,
+  );
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const workspace = workspaceQuery.data;
   const mediaSummary = workspace?.mediaSummary;
   const latestExportUrl =
@@ -151,6 +182,31 @@ export default function StudioProjectOverview(props: {
       });
     },
   });
+  const generateStyleGuideMutation = useMutation({
+    mutationFn: generateProjectStyleGuide,
+    onSuccess: (result) => {
+      setStyleDraft(result.markdown);
+      setStyleDirty(true);
+      setStyleEditorOpen(true);
+      setGenerationError(null);
+      setLastSourceSummary(result.sourceSummary);
+      setReferenceUrl("");
+      toastManager.add({
+        type: "success",
+        title: "STYLE.md draft generated",
+        description: `Reference frames analyzed from ${result.sourceSummary.displayName}.`,
+      });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "Failed to generate STYLE.md.";
+      setGenerationError(message);
+      toastManager.add({
+        type: "error",
+        title: "Style guide generation failed",
+        description: message,
+      });
+    },
+  });
 
   useEffect(() => {
     if (styleDirty) {
@@ -158,6 +214,82 @@ export default function StudioProjectOverview(props: {
     }
     setStyleDraft(workspace?.styleGuideExcerpt ?? "");
   }, [styleDirty, workspace?.styleGuideExcerpt]);
+
+  const handleReferenceUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    if (!project) {
+      return;
+    }
+    if (!file.type.startsWith("video/")) {
+      const message = "Select a video file.";
+      setGenerationError(message);
+      toastManager.add({
+        type: "warning",
+        title: "Unsupported file",
+        description: message,
+      });
+      return;
+    }
+    if (file.size <= 0 || file.size > MAX_REFERENCE_VIDEO_BYTES) {
+      const message = `Reference videos must be smaller than ${MAX_REFERENCE_VIDEO_BYTES_LABEL}.`;
+      setGenerationError(message);
+      toastManager.add({
+        type: "warning",
+        title: "Video too large",
+        description: message,
+      });
+      return;
+    }
+
+    let dataUrl: string;
+    try {
+      setGenerationError(null);
+      dataUrl = await readFileAsDataUrl(file);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to read the selected video.";
+      setGenerationError(message);
+      toastManager.add({
+        type: "error",
+        title: "Video read failed",
+        description: message,
+      });
+      return;
+    }
+
+    await generateStyleGuideMutation.mutateAsync({
+      cwd: project.cwd,
+      source: {
+        type: "upload",
+        name: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        dataUrl,
+      },
+    });
+  };
+
+  const submitReferenceUrl = async () => {
+    if (!project) {
+      return;
+    }
+    const trimmedUrl = referenceUrl.trim();
+    if (trimmedUrl.length === 0) {
+      setGenerationError("Enter a public direct video URL.");
+      return;
+    }
+    setGenerationError(null);
+    await generateStyleGuideMutation.mutateAsync({
+      cwd: project.cwd,
+      source: {
+        type: "url",
+        url: trimmedUrl,
+      },
+    });
+  };
 
   const openWorkspaceEntry = (relativePath: string) => {
     const api = ensureNativeApi();
@@ -312,6 +444,21 @@ export default function StudioProjectOverview(props: {
                   </div>
                 </div>
               ) : null}
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={(event) => void handleReferenceUpload(event)}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={generateStyleGuideMutation.isPending}
+                onClick={() => uploadInputRef.current?.click()}
+              >
+                {generateStyleGuideMutation.isPending ? "Analyzing..." : "Use Video File"}
+              </Button>
               <Button
                 size="sm"
                 variant={styleEditorOpen ? "secondary" : "outline"}
@@ -322,6 +469,43 @@ export default function StudioProjectOverview(props: {
                 {styleEditorOpen ? "Hide STYLE.md" : "Edit STYLE.md"}
               </Button>
             </div>
+          </div>
+
+          <div className="mt-3 rounded-xl border border-border/70 bg-muted/20 p-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Generate From Reference Video
+            </p>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <input
+                className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
+                placeholder="https://example.com/reference.mp4"
+                value={referenceUrl}
+                onChange={(event) => setReferenceUrl(event.target.value)}
+              />
+              <Button
+                size="sm"
+                disabled={generateStyleGuideMutation.isPending}
+                onClick={() => void submitReferenceUrl()}
+              >
+                {generateStyleGuideMutation.isPending ? "Analyzing..." : "Use Video URL"}
+              </Button>
+            </div>
+            <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+              Upload a short reference clip or paste a public direct video URL. Generated markdown
+              replaces the current editor draft but is not written until you save.
+            </p>
+            {generationError ? (
+              <p className="mt-2 text-xs text-destructive">{generationError}</p>
+            ) : null}
+            {lastSourceSummary ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Generated from {lastSourceSummary.displayName} with {lastSourceSummary.frameCount}{" "}
+                reference frame{lastSourceSummary.frameCount === 1 ? "" : "s"}.
+                {lastSourceSummary.warnings.length > 0
+                  ? ` ${lastSourceSummary.warnings.join(" ")}`
+                  : ""}
+              </p>
+            ) : null}
           </div>
 
           {styleEditorOpen ? (

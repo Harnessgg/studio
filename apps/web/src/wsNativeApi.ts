@@ -115,6 +115,8 @@ export function createWsNativeApi(): NativeApi {
       searchEntries: (input) => transport.request(WS_METHODS.projectsSearchEntries, input),
       inspectWorkspace: (input) => transport.request(WS_METHODS.projectsInspectWorkspace, input),
       writeFile: (input) => transport.request(WS_METHODS.projectsWriteFile, input),
+      generateStyleGuide: (input) =>
+        transport.request(WS_METHODS.projectsGenerateStyleGuide, input),
     },
     shell: {
       openInEditor: (cwd, editor) =>

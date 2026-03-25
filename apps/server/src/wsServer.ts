@@ -80,6 +80,7 @@ import {
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { expandHomePath } from "./os-jank.ts";
+import { generateProjectStyleGuide } from "./projectStyleGuideGenerator";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@studio/shared/schemaJson";
@@ -320,12 +321,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   }) {
     const ensureHarnessProjectScaffold = Effect.fnUntraced(function* (workspaceRoot: string) {
       yield* Effect.tryPromise(() => ensureHarnessWorkspaceScaffold(workspaceRoot)).pipe(
-        Effect.catch((cause) =>
-          Effect.fail(
+        Effect.mapError(
+          (cause) =>
             new RouteRequestError({
               message: `Failed to prepare HarnessGG project folders: ${String(cause)}`,
             }),
-          ),
         ),
       );
     });
@@ -945,6 +945,19 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           ),
         );
         return { relativePath: target.relativePath };
+      }
+
+      case WS_METHODS.projectsGenerateStyleGuide: {
+        const body = stripRequestTag(request.body);
+        return yield* Effect.tryPromise({
+          try: () => generateProjectStyleGuide(body),
+          catch: (cause) =>
+            new RouteRequestError({
+              message: `Failed to generate STYLE.md from reference video: ${String(
+                cause instanceof Error ? cause.message : cause,
+              )}`,
+            }),
+        });
       }
 
       case WS_METHODS.shellOpenInEditor: {

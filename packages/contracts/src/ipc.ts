@@ -19,6 +19,8 @@ import type {
   GitStatusResult,
 } from "./git";
 import type {
+  ProjectGenerateStyleGuideInput,
+  ProjectGenerateStyleGuideResult,
   ProjectWorkspaceInspectInput,
   ProjectWorkspaceInspectResult,
   ProjectSearchEntriesInput,
@@ -133,6 +135,9 @@ export interface NativeApi {
       input: ProjectWorkspaceInspectInput,
     ) => Promise<ProjectWorkspaceInspectResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+    generateStyleGuide: (
+      input: ProjectGenerateStyleGuideInput,
+    ) => Promise<ProjectGenerateStyleGuideResult>;
   };
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;

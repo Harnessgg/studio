@@ -3,6 +3,8 @@ import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchema
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
+export const PROJECT_STYLE_GUIDE_MAX_VIDEO_BYTES = 32 * 1024 * 1024;
+const PROJECT_STYLE_GUIDE_MAX_VIDEO_DATA_URL_CHARS = 45_000_000;
 
 export const ProjectSearchEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
@@ -37,6 +39,51 @@ export const ProjectWriteFileResult = Schema.Struct({
   relativePath: TrimmedNonEmptyString,
 });
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
+
+export const ProjectStyleGuideUploadedVideoSource = Schema.Struct({
+  type: Schema.Literal("upload"),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^video\//i)),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROJECT_STYLE_GUIDE_MAX_VIDEO_BYTES)),
+  dataUrl: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROJECT_STYLE_GUIDE_MAX_VIDEO_DATA_URL_CHARS),
+  ),
+});
+export type ProjectStyleGuideUploadedVideoSource = typeof ProjectStyleGuideUploadedVideoSource.Type;
+
+export const ProjectStyleGuideUrlSource = Schema.Struct({
+  type: Schema.Literal("url"),
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(2_048), Schema.isPattern(/^https?:\/\//i)),
+});
+export type ProjectStyleGuideUrlSource = typeof ProjectStyleGuideUrlSource.Type;
+
+export const ProjectStyleGuideSource = Schema.Union([
+  ProjectStyleGuideUploadedVideoSource,
+  ProjectStyleGuideUrlSource,
+]);
+export type ProjectStyleGuideSource = typeof ProjectStyleGuideSource.Type;
+
+export const ProjectGenerateStyleGuideInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  source: ProjectStyleGuideSource,
+});
+export type ProjectGenerateStyleGuideInput = typeof ProjectGenerateStyleGuideInput.Type;
+
+export const ProjectStyleGuideSourceSummary = Schema.Struct({
+  sourceType: Schema.Literals(["upload", "url"]),
+  displayName: TrimmedNonEmptyString,
+  resolvedPath: Schema.NullOr(TrimmedNonEmptyString),
+  resolvedUrl: Schema.NullOr(TrimmedNonEmptyString),
+  frameCount: NonNegativeInt,
+  warnings: Schema.Array(TrimmedNonEmptyString),
+});
+export type ProjectStyleGuideSourceSummary = typeof ProjectStyleGuideSourceSummary.Type;
+
+export const ProjectGenerateStyleGuideResult = Schema.Struct({
+  markdown: TrimmedNonEmptyString,
+  sourceSummary: ProjectStyleGuideSourceSummary,
+});
+export type ProjectGenerateStyleGuideResult = typeof ProjectGenerateStyleGuideResult.Type;
 
 export const ProjectWorkspaceInspectInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,

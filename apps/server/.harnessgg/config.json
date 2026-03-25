@@ -1,0 +1,7 @@
+{
+  "createdAt": "2026-03-20T02:17:17.864Z",
+  "exportsDir": ".harnessgg/exports",
+  "logsDir": ".harnessgg/logs",
+  "tempDir": ".harnessgg/tmp",
+  "transcriptionMode": "local-whisper"
+}

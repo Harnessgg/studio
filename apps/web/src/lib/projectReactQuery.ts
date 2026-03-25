@@ -1,4 +1,9 @@
-import type { ProjectSearchEntriesResult, ProjectWorkspaceInspectResult } from "@studio/contracts";
+import type {
+  ProjectGenerateStyleGuideInput,
+  ProjectGenerateStyleGuideResult,
+  ProjectSearchEntriesResult,
+  ProjectWorkspaceInspectResult,
+} from "@studio/contracts";
 import { queryOptions } from "@tanstack/react-query";
 import { ensureNativeApi } from "~/nativeApi";
 
@@ -90,4 +95,11 @@ export function projectSearchEntriesQueryOptions(input: {
     staleTime: input.staleTime ?? DEFAULT_SEARCH_ENTRIES_STALE_TIME,
     placeholderData: (previous) => previous ?? EMPTY_SEARCH_ENTRIES_RESULT,
   });
+}
+
+export async function generateProjectStyleGuide(
+  input: ProjectGenerateStyleGuideInput,
+): Promise<ProjectGenerateStyleGuideResult> {
+  const api = ensureNativeApi();
+  return api.projects.generateStyleGuide(input);
 }
