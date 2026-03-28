@@ -45,12 +45,33 @@ export type ServerProviderStatus = typeof ServerProviderStatus.Type;
 
 const ServerProviderStatuses = Schema.Array(ServerProviderStatus);
 
+export const ServerToolKind = Schema.Literals([
+  "ffmpeg",
+  "python",
+  "kdenlive",
+  "harnessggKdenlive",
+]);
+export type ServerToolKind = typeof ServerToolKind.Type;
+
+export const ServerToolStatus = Schema.Struct({
+  tool: ServerToolKind,
+  label: TrimmedNonEmptyString,
+  status: ServerProviderStatusState,
+  available: Schema.Boolean,
+  checkedAt: IsoDateTime,
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerToolStatus = typeof ServerToolStatus.Type;
+
+const ServerToolStatuses = Schema.Array(ServerToolStatus);
+
 export const ServerConfig = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   keybindingsConfigPath: TrimmedNonEmptyString,
   keybindings: ResolvedKeybindingsConfig,
   issues: ServerConfigIssues,
   providers: ServerProviderStatuses,
+  tools: ServerToolStatuses,
   availableEditors: Schema.Array(EditorId),
 });
 export type ServerConfig = typeof ServerConfig.Type;
@@ -67,5 +88,6 @@ export type ServerUpsertKeybindingResult = typeof ServerUpsertKeybindingResult.T
 export const ServerConfigUpdatedPayload = Schema.Struct({
   issues: ServerConfigIssues,
   providers: ServerProviderStatuses,
+  tools: ServerToolStatuses,
 });
 export type ServerConfigUpdatedPayload = typeof ServerConfigUpdatedPayload.Type;

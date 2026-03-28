@@ -570,8 +570,20 @@ function compareExportPaths(left: string, right: string): number {
   return right.localeCompare(left, undefined, { numeric: true, sensitivity: "base" });
 }
 
+function summarizeCommandOutput(value: string | undefined, fallback: string): string {
+  const firstLine = value
+    ?.split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  return firstLine ?? fallback;
+}
+
 function isPreviewableVideoPath(entryPath: string): boolean {
   return PREVIEWABLE_VIDEO_FILE_EXTENSIONS.has(fileExtensionOf(entryPath));
+}
+
+function isAssetListEntryPath(entryPath: string): boolean {
+  return !entryPath.startsWith(".harnessgg/");
 }
 
 async function readTextFileIfPresent(filePath: string, maxBytes: number): Promise<string | null> {
@@ -615,13 +627,16 @@ async function resolveDependencyStatuses(
       return { ok: false as const, detail: result.message };
     }
 
-    const detail = [result.stdout.trim(), result.stderr.trim()].find((value) => value.length > 0);
+    const detail = summarizeCommandOutput(
+      [result.stdout.trim(), result.stderr.trim()].find((value) => value.length > 0),
+      "Installed",
+    );
     if (result.code === 0) {
-      return { ok: true as const, detail: detail ?? "Installed" };
+      return { ok: true as const, detail };
     }
     return {
       ok: false as const,
-      detail: detail ?? `${command} exited with code ${result.code ?? "null"}`,
+      detail: detail === "Installed" ? `${command} is unavailable` : detail,
     };
   };
 
@@ -652,7 +667,7 @@ async function resolveDependencyStatuses(
 
   const [kdenlive, ffmpeg, python, codex] = await Promise.all([
     commandExists("kdenlive"),
-    commandExists("ffmpeg"),
+    commandExists("ffmpeg", ["-version"]),
     commandExists("python"),
     commandExists("codex", ["--version"]),
   ]);
@@ -756,6 +771,7 @@ export async function inspectWorkspace(
   ).length;
   const mediaEntries = entries
     .filter((entry) => entry.kind === "file")
+    .filter((entry) => isAssetListEntryPath(entry.path))
     .filter((entry) => {
       const category = classifyWorkspaceEntry(entry.path);
       return (

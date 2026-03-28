@@ -6,3 +6,4 @@ export const RENDERER_STATE_STORAGE_KEY = "harnessgg-studio:renderer-state:v1";
 export const LAST_EDITOR_STORAGE_KEY = "harnessgg-studio:last-editor";
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_STORAGE_KEY =
   "harnessgg-studio:last-invoked-script-by-project";
+export const VIDEO_REVIEW_COMMENTS_STORAGE_KEY = "harnessgg-studio:video-review-comments:v1";

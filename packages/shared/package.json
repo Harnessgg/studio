@@ -31,6 +31,10 @@
     "./schemaJson": {
       "types": "./src/schemaJson.ts",
       "import": "./src/schemaJson.ts"
+    },
+    "./studioDependencies": {
+      "types": "./src/studioDependencies.ts",
+      "import": "./src/studioDependencies.ts"
     }
   },
   "scripts": {

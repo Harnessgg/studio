@@ -53,6 +53,7 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  onFileLinkActivate?: (targetPath: string) => boolean | void;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -234,7 +235,7 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({ text, cwd, isStreaming = false, onFileLinkActivate }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const markdownComponents = useMemo<Components>(
@@ -252,6 +253,9 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
+              if (onFileLinkActivate?.(targetPath)) {
+                return;
+              }
               const api = readNativeApi();
               if (api) {
                 void api.shell.openInEditor(targetPath, preferredTerminalEditor());
@@ -284,7 +288,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
         );
       },
     }),
-    [cwd, diffThemeName, isStreaming],
+    [cwd, diffThemeName, isStreaming, onFileLinkActivate],
   );
 
   return (

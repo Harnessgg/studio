@@ -6,7 +6,7 @@
  *
  * @module ProviderHealth
  */
-import type { ServerProviderStatus } from "@studio/contracts";
+import type { ServerProviderStatus, ServerToolStatus } from "@studio/contracts";
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 
@@ -15,6 +15,11 @@ export interface ProviderHealthShape {
    * Read provider health statuses computed at server startup.
    */
   readonly getStatuses: Effect.Effect<ReadonlyArray<ServerProviderStatus>>;
+
+  /**
+   * Read editing-tool health statuses computed at server startup.
+   */
+  readonly getToolStatuses: Effect.Effect<ReadonlyArray<ServerToolStatus>>;
 }
 
 export class ProviderHealth extends ServiceMap.Service<ProviderHealth, ProviderHealthShape>()(

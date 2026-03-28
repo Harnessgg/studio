@@ -148,7 +148,6 @@ import {
   ListTodoIcon,
   LockIcon,
   LockOpenIcon,
-  PlayCircleIcon,
   Undo2Icon,
   XIcon,
   CopyIcon,
@@ -157,7 +156,6 @@ import {
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Separator } from "./ui/separator";
-import { Textarea } from "./ui/textarea";
 import { Group, GroupSeparator } from "./ui/group";
 import {
   Menu,
@@ -231,6 +229,8 @@ import {
   LAST_INVOKED_SCRIPT_BY_PROJECT_STORAGE_KEY,
 } from "../storageKeys";
 import { parseCodexStudioResult } from "../codexStudioResult";
+import VideoReviewPlayer from "./VideoReviewPlayer";
+import { buildVideoReviewFeedbackMessage, type VideoReviewComment } from "../videoReview";
 
 function formatMessageMeta(createdAt: string, duration: string | null): string {
   if (!duration) return formatTimestamp(createdAt);
@@ -258,6 +258,76 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   }
 
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function stripStudioResultTrailer(messageText: string): string {
+  const normalizedText = messageText.replace(/\r\n/g, "\n");
+  const studioResultIndex = normalizedText.search(/^STUDIO_RESULT:\s*(DONE|ERROR)\s*$/im);
+  if (studioResultIndex < 0) {
+    return normalizedText.trim();
+  }
+  return normalizedText.slice(0, studioResultIndex).trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripInjectedSessionSection(messageText: string, heading: string): string {
+  return messageText.replace(
+    new RegExp(
+      String.raw`(?:^|\n\n)${escapeRegExp(heading)}\n[\s\S]*?(?=\n\n(?:[A-Z][^\n]*:)|$)`,
+      "gi",
+    ),
+    "\n\n",
+  );
+}
+
+function stripInjectedAgentsGuide(messageText: string): string {
+  return stripInjectedSessionSection(messageText, "AGENTS.md excerpt:").trim();
+}
+
+function sanitizeDisplayedAssistantMessage(messageText: string): string {
+  const withoutStudioTrailer = stripStudioResultTrailer(messageText);
+  if (withoutStudioTrailer.trimStart().startsWith(STUDIO_SESSION_CONTEXT_PREFIX)) {
+    return "";
+  }
+  const agentsGuideIndex = withoutStudioTrailer.search(/AGENTS\.md excerpt:/i);
+  const withoutLeakedAgentsGuide =
+    agentsGuideIndex >= 0 ? withoutStudioTrailer.slice(0, agentsGuideIndex) : withoutStudioTrailer;
+  return stripInjectedAgentsGuide(withoutLeakedAgentsGuide);
+}
+
+function stripFilePositionSuffix(pathValue: string): string {
+  const trailingNumberMatch = pathValue.match(/:(\d+)$/);
+  if (!trailingNumberMatch) {
+    return pathValue;
+  }
+  const withoutTrailingNumber = pathValue.slice(0, -trailingNumberMatch[0].length);
+  const lineMatch = withoutTrailingNumber.match(/:(\d+)$/);
+  return lineMatch ? withoutTrailingNumber.slice(0, -lineMatch[0].length) : withoutTrailingNumber;
+}
+
+function toWorkspaceRelativePath(targetPath: string, workspaceRoot: string): string | null {
+  const normalizedWorkspaceRoot = workspaceRoot.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedTargetPath = stripFilePositionSuffix(targetPath)
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+  const useCaseInsensitiveComparison = /^[A-Za-z]:\//.test(normalizedWorkspaceRoot);
+  const comparableWorkspaceRoot = useCaseInsensitiveComparison
+    ? normalizedWorkspaceRoot.toLowerCase()
+    : normalizedWorkspaceRoot;
+  const comparableTargetPath = useCaseInsensitiveComparison
+    ? normalizedTargetPath.toLowerCase()
+    : normalizedTargetPath;
+
+  if (comparableTargetPath === comparableWorkspaceRoot) {
+    return "";
+  }
+  if (!comparableTargetPath.startsWith(`${comparableWorkspaceRoot}/`)) {
+    return null;
+  }
+  return normalizedTargetPath.slice(normalizedWorkspaceRoot.length + 1);
 }
 
 function findLatestResolvedAssistantMessage(
@@ -461,13 +531,6 @@ interface PullRequestDialogState {
   key: number;
 }
 
-interface TimelineComment {
-  id: string;
-  text: string;
-  timestampSeconds: number;
-  createdAt: string;
-}
-
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -503,25 +566,6 @@ function cloneComposerImageForRetry(image: ComposerImageAttachment): ComposerIma
   } catch {
     return image;
   }
-}
-
-function formatVideoCommentTimestamp(totalSeconds: number): string {
-  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
-    return "00:00.000";
-  }
-
-  const wholeSeconds = Math.floor(totalSeconds);
-  const milliseconds = Math.floor((totalSeconds - wholeSeconds) * 1000);
-  const hours = Math.floor(wholeSeconds / 3600);
-  const minutes = Math.floor((wholeSeconds % 3600) / 60);
-  const seconds = wholeSeconds % 60;
-
-  const hh = String(hours).padStart(2, "0");
-  const mm = String(minutes).padStart(2, "0");
-  const ss = String(seconds).padStart(2, "0");
-  const mmm = String(milliseconds).padStart(3, "0");
-
-  return hours > 0 ? `${hh}:${mm}:${ss}.${mmm}` : `${mm}:${ss}.${mmm}`;
 }
 
 const VscodeEntryIcon = memo(function VscodeEntryIcon(props: {
@@ -739,15 +783,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [attachmentPreviewHandoffByMessageId, setAttachmentPreviewHandoffByMessageId] = useState<
     Record<string, string[]>
   >({});
+  const [canvasMode, setCanvasMode] = useState<"preview" | "chat">("preview");
   const [selectedPreviewPath, setSelectedPreviewPath] = useState<string | null>(null);
-  const [timelineCommentsByPath, setTimelineCommentsByPath] = useState<
-    Record<string, TimelineComment[]>
-  >({});
-  const [isTimelineCommentDialogOpen, setIsTimelineCommentDialogOpen] = useState(false);
-  const [timelineCommentDraft, setTimelineCommentDraft] = useState("");
-  const [previewCurrentTimeSeconds, setPreviewCurrentTimeSeconds] = useState(0);
-  const [previewDurationSeconds, setPreviewDurationSeconds] = useState(0);
-  const [timelineCommentTimestampSeconds, setTimelineCommentTimestampSeconds] = useState(0);
   const [composerCursor, setComposerCursor] = useState(() => prompt.length);
   const [composerTrigger, setComposerTrigger] = useState<ComposerTrigger | null>(() =>
     detectComposerTrigger(prompt, prompt.length),
@@ -756,6 +793,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     Record<string, string>
   >(() => readLastInvokedScriptByProjectFromStorage());
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const [messagesScrollContainer, setMessagesScrollContainer] = useState<HTMLDivElement | null>(
+    null,
+  );
   const shouldAutoScrollRef = useRef(true);
   const lastKnownScrollTopRef = useRef(0);
   const isPointerScrollActiveRef = useRef(false);
@@ -771,11 +811,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerFormHeightRef = useRef(0);
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
+  const setMessagesScrollNode = useCallback((node: HTMLDivElement | null) => {
+    messagesScrollRef.current = node;
+    setMessagesScrollContainer(node);
+  }, []);
   const composerSelectLockRef = useRef(false);
   const composerMenuOpenRef = useRef(false);
   const composerMenuItemsRef = useRef<ComposerCommandItem[]>([]);
   const activeComposerMenuItemRef = useRef<ComposerCommandItem | null>(null);
-  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
   const sendInFlightRef = useRef(false);
@@ -1299,6 +1342,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         if (entry.kind === "message") {
           if (entry.message.role === "system") return false;
           if (isStudioSessionContextMessage(entry.message)) return false;
+          if (
+            entry.message.role === "assistant" &&
+            !entry.message.streaming &&
+            sanitizeDisplayedAssistantMessage(entry.message.text).length === 0
+          ) {
+            return false;
+          }
         }
         return true;
       }),
@@ -2419,7 +2469,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const defaultPreviewPath =
     parsedStudioResult?.status === "done" && parsedStudioResult.relativePath
       ? parsedStudioResult.relativePath
-      : (inspectedWorkspace?.latestExportPath ?? inspectedWorkspace?.sampleVideoPaths[0] ?? null);
+      : (inspectedWorkspace?.latestExportPath ?? inspectedWorkspace?.sampleVideoPaths?.[0] ?? null);
   const preferredPreviewPath = selectedPreviewPath ?? defaultPreviewPath;
   const previewKind = preferredPreviewPath
     ? classifyWorkspacePreviewKind(preferredPreviewPath)
@@ -2429,25 +2479,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       ? buildWorkspaceFileUrl(activeProject.cwd, preferredPreviewPath)
       : null;
   const previewPosterUrl =
-    inspectedWorkspace?.sampleImagePaths[0] && activeProject?.cwd
+    inspectedWorkspace?.sampleImagePaths?.[0] && activeProject?.cwd
       ? buildWorkspaceFileUrl(activeProject.cwd, inspectedWorkspace.sampleImagePaths[0])
       : null;
-  const previewTitle = selectedPreviewPath
-    ? "Selected media"
-    : parsedStudioResult?.status === "done" && parsedStudioResult.relativePath
-      ? "Finished file"
-      : inspectedWorkspace?.latestExportPath
-        ? "Latest export"
-        : inspectedWorkspace?.sampleVideoPaths[0]
-          ? "Source preview"
-          : "Preview unavailable";
-  const previewStatusLabel = selectedPreviewPath
-    ? "Selected"
-    : parsedStudioResult?.status === "done"
-      ? "Done"
-      : parsedStudioResult?.status === "error"
-        ? "Error"
-        : null;
   const runStatusLabel = isWorking ? "Working" : "Idle";
   const activeWorkElapsed =
     isWorking && activeWorkStartedAt ? formatElapsed(activeWorkStartedAt, nowIso) : null;
@@ -2464,9 +2498,27 @@ export default function ChatView({ threadId }: ChatViewProps) {
       "file-manager",
     );
   }, [activeProject?.cwd, preferredPreviewPath]);
-  const previewTimelineComments = useMemo(
-    () => (preferredPreviewPath ? (timelineCommentsByPath[preferredPreviewPath] ?? []) : []),
-    [preferredPreviewPath, timelineCommentsByPath],
+  const onActivatePreviewableFileLink = useCallback(
+    (targetPath: string) => {
+      if (!activeProject?.cwd) {
+        return false;
+      }
+      const relativePath =
+        toWorkspaceRelativePath(targetPath, activeProject.cwd) ??
+        (activeThread?.worktreePath
+          ? toWorkspaceRelativePath(targetPath, activeThread.worktreePath)
+          : null);
+      if (!relativePath) {
+        return false;
+      }
+      if (classifyWorkspacePreviewKind(relativePath) === "other") {
+        return false;
+      }
+      setSelectedPreviewPath(relativePath);
+      setCanvasMode("preview");
+      return true;
+    },
+    [activeProject?.cwd, activeThread?.worktreePath],
   );
 
   useEffect(() => {
@@ -2498,12 +2550,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [isLiveChatOpen, liveChatTailKey]);
 
   useEffect(() => {
-    setPreviewCurrentTimeSeconds(0);
-    setPreviewDurationSeconds(0);
-    setTimelineCommentDraft("");
-    setTimelineCommentTimestampSeconds(0);
-    setIsTimelineCommentDialogOpen(false);
-  }, [preferredPreviewPath]);
+    if (canvasMode !== "chat") {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      forceStickToBottom();
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [canvasMode, forceStickToBottom, liveChatTailKey]);
 
   useEffect(() => {
     if (!isWorking) return;
@@ -3363,73 +3419,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [sendPlainUserTurn],
   );
 
-  const openTimelineCommentDialog = useCallback(() => {
-    if (!preferredPreviewPath) {
-      return;
-    }
-    if (previewVideoRef.current) {
-      previewVideoRef.current.pause();
-    }
-    setTimelineCommentTimestampSeconds(previewCurrentTimeSeconds);
-    setTimelineCommentDraft("");
-    setIsTimelineCommentDialogOpen(true);
-  }, [preferredPreviewPath, previewCurrentTimeSeconds]);
+  const onSendTimelineComments = useCallback(
+    async (comments: VideoReviewComment[]) => {
+      if (!preferredPreviewPath || comments.length === 0) {
+        return;
+      }
 
-  const onSaveTimelineComment = useCallback(() => {
-    if (!preferredPreviewPath) {
-      return;
-    }
-
-    const trimmed = timelineCommentDraft.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    const nextComment: TimelineComment = {
-      id: randomUUID(),
-      text: trimmed,
-      timestampSeconds: timelineCommentTimestampSeconds,
-      createdAt: new Date().toISOString(),
-    };
-    setTimelineCommentsByPath((existing) => ({
-      ...existing,
-      [preferredPreviewPath]: [...(existing[preferredPreviewPath] ?? []), nextComment].toSorted(
-        (left, right) => left.timestampSeconds - right.timestampSeconds,
-      ),
-    }));
-    setTimelineCommentDraft("");
-    setIsTimelineCommentDialogOpen(false);
-  }, [preferredPreviewPath, timelineCommentDraft, timelineCommentTimestampSeconds]);
-
-  const onSendTimelineComments = useCallback(async () => {
-    if (!preferredPreviewPath || previewTimelineComments.length === 0) {
-      return;
-    }
-
-    const didSend = await sendPlainUserTurn({
-      text: [
-        `Timeline feedback for file: ${preferredPreviewPath}`,
-        "Comments:",
-        ...previewTimelineComments.map(
-          (comment, index) =>
-            `${index + 1}. [${formatVideoCommentTimestamp(comment.timestampSeconds)}] ${comment.text}`,
-        ),
-      ].join("\n"),
-      interactionMode,
-      errorMessage: "Failed to send timeline comments.",
-      onSuccess: () => {
-        setTimelineCommentsByPath((existing) => {
-          const next = { ...existing };
-          delete next[preferredPreviewPath];
-          return next;
-        });
-      },
-    });
-
-    if (didSend && previewVideoRef.current) {
-      previewVideoRef.current.focus();
-    }
-  }, [interactionMode, preferredPreviewPath, previewTimelineComments, sendPlainUserTurn]);
+      await sendPlainUserTurn({
+        text: buildVideoReviewFeedbackMessage(preferredPreviewPath, comments),
+        interactionMode,
+        errorMessage: "Failed to send video comments.",
+      });
+    },
+    [interactionMode, preferredPreviewPath, sendPlainUserTurn],
+  );
 
   const onImplementPlanInNewThread = useCallback(async () => {
     const api = readNativeApi();
@@ -3901,244 +3904,162 @@ export default function ChatView({ threadId }: ChatViewProps) {
           </div>
 
           <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-3 overflow-hidden px-3 pb-3 pt-3 sm:px-5 sm:pb-5">
-            <section className="flex min-h-0 flex-col overflow-y-auto rounded-3xl border border-border bg-card/70">
-              <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-cyan-600/80">
-                    Editor canvas
-                  </p>
-                  <h2 className="mt-1 text-sm font-semibold text-foreground">{previewTitle}</h2>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                  <span className="rounded-full border border-border bg-background px-2.5 py-1">
-                    {runStatusLabel}
-                  </span>
-                  {activeWorkElapsed ? (
-                    <span className="rounded-full border border-border bg-background px-2.5 py-1 tabular-nums">
-                      {activeWorkElapsed}
-                    </span>
-                  ) : null}
-                  {previewStatusLabel ? (
-                    <span className="rounded-full border border-border bg-background px-2.5 py-1">
-                      {previewStatusLabel}
-                    </span>
-                  ) : null}
-                  {completionSummary ? (
-                    <span className="rounded-full border border-border bg-background px-2.5 py-1">
-                      {completionSummary}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-3 p-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(260px,0.9fr)]">
-                <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background/80">
-                  {previewFileUrl && previewKind === "video" ? (
-                    <div className="flex min-h-0 flex-1 flex-col bg-black">
-                      <video
-                        ref={previewVideoRef}
-                        className="min-h-0 flex-1 bg-black object-contain"
-                        controls
-                        onLoadedMetadata={(event) => {
-                          setPreviewCurrentTimeSeconds(event.currentTarget.currentTime);
-                          setPreviewDurationSeconds(event.currentTarget.duration || 0);
-                        }}
-                        onTimeUpdate={(event) => {
-                          setPreviewCurrentTimeSeconds(event.currentTarget.currentTime);
-                        }}
-                        poster={previewPosterUrl ?? undefined}
-                        preload="metadata"
-                        src={previewFileUrl}
-                      />
-                      <div className="border-t border-white/10 px-3 py-2">
-                        <div className="relative h-3 overflow-hidden rounded-full bg-white/10">
-                          {previewTimelineComments.map((comment) => {
-                            const leftPercent =
-                              previewDurationSeconds > 0
-                                ? (comment.timestampSeconds / previewDurationSeconds) * 100
-                                : 0;
-                            return (
-                              <Tooltip key={comment.id}>
-                                <TooltipTrigger
-                                  render={
-                                    <button
-                                      type="button"
-                                      className="absolute top-0 h-full w-1.5 -translate-x-1/2 rounded-full bg-yellow-400 shadow-[0_0_0_1px_rgba(15,23,42,0.55)] transition-transform hover:scale-y-110"
-                                      style={{
-                                        left: `${clamp(leftPercent, {
-                                          minimum: 0,
-                                          maximum: 100,
-                                        })}%`,
-                                      }}
-                                      onClick={() => {
-                                        if (previewVideoRef.current) {
-                                          previewVideoRef.current.currentTime =
-                                            comment.timestampSeconds;
-                                          setPreviewCurrentTimeSeconds(comment.timestampSeconds);
-                                          previewVideoRef.current.pause();
-                                        }
-                                      }}
-                                    />
-                                  }
-                                />
-                                <TooltipPopup side="top" className="max-w-72 whitespace-normal">
-                                  <p className="font-medium text-foreground">
-                                    {formatVideoCommentTimestamp(comment.timestampSeconds)}
-                                  </p>
-                                  <p className="mt-1 text-muted-foreground">{comment.text}</p>
-                                </TooltipPopup>
-                              </Tooltip>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  ) : previewFileUrl && previewKind === "image" ? (
-                    <div className="flex min-h-0 flex-1 items-center justify-center bg-muted/10 p-3">
-                      <img
-                        alt=""
-                        className="min-h-0 max-h-full max-w-full object-contain"
-                        src={previewFileUrl}
-                      />
-                    </div>
-                  ) : previewFileUrl && previewKind === "audio" ? (
-                    <div className="flex min-h-[220px] flex-1 items-center justify-center bg-muted/10 p-6">
-                      <audio
-                        className="w-full max-w-xl"
-                        controls
-                        preload="metadata"
-                        src={previewFileUrl}
-                      />
-                    </div>
-                  ) : previewFileUrl && previewKind === "document" ? (
-                    <iframe
-                      className="min-h-0 flex-1 bg-white"
-                      sandbox="allow-same-origin"
-                      src={previewFileUrl}
-                      title={preferredPreviewPath ?? "Document preview"}
-                    />
-                  ) : previewFileUrl && preferredPreviewPath ? (
-                    <div className="flex min-h-[220px] flex-1 flex-col items-center justify-center gap-3 bg-muted/20 p-6 text-center">
-                      <p className="text-sm text-foreground">Finished file ready</p>
-                      <p className="max-w-md text-xs text-muted-foreground">
-                        The latest Codex result points to a file that cannot be rendered inline.
-                      </p>
-                      <Button size="sm" variant="outline" onClick={openPreviewFileInEditor}>
-                        Open output file
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex min-h-[220px] flex-1 items-center justify-center bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-                      {parsedStudioResult?.status === "error" && parsedStudioResult.errorMessage
-                        ? parsedStudioResult.errorMessage
-                        : "Add clips to this project and export a pass to see the editor preview here."}
-                    </div>
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.55fr)_minmax(280px,340px)]">
+              <div className="flex min-h-0 flex-col">
+                <div
+                  className={cn(
+                    "flex min-h-[320px] flex-1 flex-col overflow-hidden",
+                    canvasMode === "preview"
+                      ? "rounded-2xl border border-border bg-background/80"
+                      : "min-w-0",
                   )}
-                  <div className="flex flex-wrap gap-2 border-t border-border px-3 py-3 text-xs text-muted-foreground">
-                    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1">
-                      <PlayCircleIcon className="size-3.5" />
-                      {preferredPreviewPath ?? "No preview file yet"}
-                    </span>
-                    {previewKind === "video" && preferredPreviewPath ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 tabular-nums">
-                        {formatVideoCommentTimestamp(previewCurrentTimeSeconds)}
-                      </span>
-                    ) : null}
-                  </div>
-                  {previewKind === "video" && preferredPreviewPath ? (
-                    <div className="border-t border-border bg-card/40 px-3 py-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-medium text-foreground">Timeline comments</p>
-                          <p className="text-xs text-muted-foreground">
-                            Save notes on the timeline, then send them to Codex as one list.
+                >
+                  {canvasMode === "preview" ? (
+                    <>
+                      {previewFileUrl && previewKind === "video" ? (
+                        <VideoReviewPlayer
+                          key={`${threadId}:${preferredPreviewPath}`}
+                          isConnecting={isConnecting}
+                          isSendBusy={isSendBusy}
+                          onSendFeedback={onSendTimelineComments}
+                          posterUrl={previewPosterUrl ?? null}
+                          threadId={threadId}
+                          videoPath={preferredPreviewPath!}
+                          videoUrl={previewFileUrl}
+                        />
+                      ) : previewFileUrl && previewKind === "image" ? (
+                        <div className="flex min-h-0 flex-1 items-center justify-center bg-muted/10 p-3">
+                          <img
+                            alt=""
+                            className="min-h-0 max-h-full max-w-full object-contain"
+                            src={previewFileUrl}
+                          />
+                        </div>
+                      ) : previewFileUrl && previewKind === "audio" ? (
+                        <div className="flex min-h-[220px] flex-1 items-center justify-center bg-muted/10 p-6">
+                          <audio
+                            className="w-full max-w-xl"
+                            controls
+                            preload="metadata"
+                            src={previewFileUrl}
+                          />
+                        </div>
+                      ) : previewFileUrl && previewKind === "document" ? (
+                        <iframe
+                          className="min-h-0 flex-1 bg-white"
+                          sandbox="allow-same-origin"
+                          src={previewFileUrl}
+                          title={preferredPreviewPath ?? "Document preview"}
+                        />
+                      ) : previewFileUrl && preferredPreviewPath ? (
+                        <div className="flex min-h-[220px] flex-1 flex-col items-center justify-center gap-3 bg-muted/20 p-6 text-center">
+                          <p className="text-sm text-foreground">Finished file ready</p>
+                          <p className="max-w-md text-xs text-muted-foreground">
+                            The latest Codex result points to a file that cannot be rendered inline.
                           </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={openTimelineCommentDialog}
-                            type="button"
-                          >
-                            Add comment
+                          <Button size="sm" variant="outline" onClick={openPreviewFileInEditor}>
+                            Open output file
                           </Button>
-                          <Button
-                            disabled={
-                              previewTimelineComments.length === 0 || isSendBusy || isConnecting
-                            }
-                            onClick={() => void onSendTimelineComments()}
-                            size="sm"
-                            type="button"
-                          >
-                            Send feedback ({previewTimelineComments.length})
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1">
-                          {basenameOfPath(preferredPreviewPath)}
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 tabular-nums">
-                          Current frame {formatVideoCommentTimestamp(previewCurrentTimeSeconds)}
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/40 bg-yellow-500/10 px-2.5 py-1 text-yellow-200">
-                          {previewTimelineComments.length} saved comment
-                          {previewTimelineComments.length === 1 ? "" : "s"}
-                        </span>
-                      </div>
-                      {previewTimelineComments.length > 0 ? (
-                        <div className="mt-3 space-y-2">
-                          {previewTimelineComments.map((comment) => (
-                            <button
-                              key={comment.id}
-                              type="button"
-                              className="flex w-full items-start justify-between gap-3 rounded-xl border border-border bg-background/75 px-3 py-2 text-left transition-colors hover:bg-accent/30"
-                              onClick={() => {
-                                if (previewVideoRef.current) {
-                                  previewVideoRef.current.currentTime = comment.timestampSeconds;
-                                  setPreviewCurrentTimeSeconds(comment.timestampSeconds);
-                                  previewVideoRef.current.pause();
-                                }
-                              }}
-                            >
-                              <div className="min-w-0">
-                                <p className="font-mono text-[11px] text-yellow-300">
-                                  {formatVideoCommentTimestamp(comment.timestampSeconds)}
-                                </p>
-                                <p className="mt-1 break-words text-sm text-foreground">
-                                  {comment.text}
-                                </p>
-                              </div>
-                            </button>
-                          ))}
                         </div>
                       ) : (
-                        <p className="mt-3 text-xs text-muted-foreground">
-                          No saved comments for this clip yet.
-                        </p>
+                        <div className="flex min-h-[220px] flex-1 items-center justify-center bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                          {parsedStudioResult?.status === "error" && parsedStudioResult.errorMessage
+                            ? parsedStudioResult.errorMessage
+                            : "Add clips to this project and export a pass to see the editor preview here."}
+                        </div>
                       )}
+                    </>
+                  ) : (
+                    <div
+                      ref={setMessagesScrollNode}
+                      className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-5 sm:py-4"
+                      onScroll={_onMessagesScroll}
+                      onClickCapture={_onMessagesClickCapture}
+                      onWheel={_onMessagesWheel}
+                      onPointerDown={_onMessagesPointerDown}
+                      onPointerUp={_onMessagesPointerUp}
+                      onPointerCancel={_onMessagesPointerCancel}
+                      onTouchStart={_onMessagesTouchStart}
+                      onTouchMove={_onMessagesTouchMove}
+                      onTouchEnd={_onMessagesTouchEnd}
+                      onTouchCancel={_onMessagesTouchEnd}
+                    >
+                      <_MessagesTimeline
+                        activeTurnInProgress={phase === "running"}
+                        activeTurnStartedAt={activeLatestTurn?.startedAt ?? activeWorkStartedAt}
+                        completionDividerBeforeEntryId={_completionDividerBeforeEntryId}
+                        completionSummary={completionSummary}
+                        expandedWorkGroups={_expandedWorkGroups}
+                        hasMessages={liveChatTimelineEntries.length > 0}
+                        isRevertingCheckpoint={isRevertingCheckpoint}
+                        isWorking={isWorking}
+                        markdownCwd={gitCwd ?? undefined}
+                        nowIso={nowIso}
+                        onImageExpand={_onExpandTimelineImage}
+                        onOpenTurnDiff={_onOpenTurnDiff}
+                        onRevertUserMessage={_onRevertUserMessage}
+                        onActivatePreviewableFileLink={onActivatePreviewableFileLink}
+                        onToggleWorkGroup={(groupId) =>
+                          setExpandedWorkGroups((current) => ({
+                            ...current,
+                            [groupId]: !(current[groupId] ?? false),
+                          }))
+                        }
+                        resolvedTheme={resolvedTheme}
+                        revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                        scrollContainer={messagesScrollContainer}
+                        timelineEntries={liveChatTimelineEntries}
+                        turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                        workspaceRoot={activeProject?.cwd ?? undefined}
+                      />
                     </div>
-                  ) : null}
-                </div>
-
-                <div className="grid min-h-0 grid-rows-[minmax(0,1fr)] gap-3 overflow-hidden">
-                  <div className="min-h-0 overflow-hidden rounded-2xl border border-border bg-background/80">
-                    <StudioProjectOverview
-                      threadId={threadId}
-                      showPreview={false}
-                      onPreviewEntry={setSelectedPreviewPath}
-                    />
-                  </div>
+                  )}
                 </div>
               </div>
-            </section>
+
+              <div className="grid min-h-0 grid-rows-[minmax(0,1fr)] gap-3 overflow-hidden">
+                <div className="min-h-0 overflow-hidden rounded-2xl border border-border bg-background/80">
+                  <StudioProjectOverview
+                    previewPath={preferredPreviewPath}
+                    threadId={threadId}
+                    showPreview={canvasMode === "chat"}
+                    onPreviewEntry={setSelectedPreviewPath}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="flex shrink-0 flex-col bg-background">
           <div className="flex items-center gap-3 border-b border-border px-3 py-2 sm:px-5">
             <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="inline-flex rounded-full border border-border bg-background p-0.5">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                    canvasMode === "preview"
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => setCanvasMode("preview")}
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                    canvasMode === "chat"
+                      ? "bg-foreground text-background"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                  onClick={() => setCanvasMode("chat")}
+                >
+                  Chat
+                </button>
+              </div>
               <span className="hidden rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-muted-foreground sm:inline">
                 {activeProvider === "codex" ? "Codex" : activeProvider}
                 {selectedModel ? ` · ${selectedModel}` : ""}
@@ -4163,9 +4084,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 </span>
               ) : null}
             </div>
-            <Button size="sm" variant="outline" onClick={() => setIsLiveChatOpen(true)}>
-              View live chat
-            </Button>
           </div>
 
           <div className={cn("px-3 pt-2 sm:px-5", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
@@ -4678,59 +4596,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       </div>
 
       <Dialog
-        open={isTimelineCommentDialogOpen}
-        onOpenChange={(open) => {
-          setIsTimelineCommentDialogOpen(open);
-          if (!open) {
-            setTimelineCommentDraft("");
-          }
-        }}
-      >
-        <DialogPopup className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Add timeline comment</DialogTitle>
-            <DialogDescription>
-              Save feedback for <code>{basenameOfPath(preferredPreviewPath ?? "video")}</code> at{" "}
-              <span className="font-mono">
-                {formatVideoCommentTimestamp(timelineCommentTimestampSeconds)}
-              </span>
-              .
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel className="space-y-3">
-            <Textarea
-              autoFocus
-              className="min-h-28 resize-y text-sm"
-              onChange={(event) => setTimelineCommentDraft(event.target.value)}
-              placeholder="Describe the change needed at this point in the edit"
-              value={timelineCommentDraft}
-            />
-          </DialogPanel>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setIsTimelineCommentDialogOpen(false);
-                setTimelineCommentDraft("");
-              }}
-              type="button"
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={!timelineCommentDraft.trim()}
-              onClick={onSaveTimelineComment}
-              type="button"
-            >
-              Save comment
-            </Button>
-          </DialogFooter>
-        </DialogPopup>
-      </Dialog>
-
-      <Dialog
         open={isLiveChatOpen}
         onOpenChange={(open) => {
           setIsLiveChatOpen(open);
@@ -4795,6 +4660,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             <ChatMarkdown
                               text={entry.proposedPlan.planMarkdown}
                               cwd={gitCwd ?? undefined}
+                              onFileLinkActivate={onActivatePreviewableFileLink}
                             />
                           </div>
                         </div>
@@ -4803,8 +4669,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
                     if (entry.message.role === "user") {
                       return (
-                        <div key={`live-chat-message:${entry.id}`} className="flex justify-end">
-                          <div className="max-w-[82%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3 shadow-sm">
+                        <div
+                          key={`live-chat-message:${entry.id}`}
+                          className="flex justify-end pl-14 sm:pl-24"
+                        >
+                          <div className="ml-auto max-w-[78%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3 shadow-sm">
                             <div className="mb-2 flex items-center justify-between gap-3">
                               <span className="rounded-full border border-border/70 bg-background/60 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                                 You
@@ -4821,32 +4690,35 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       );
                     }
 
+                    const displayedAssistantText = sanitizeDisplayedAssistantMessage(
+                      entry.message.text ?? "",
+                    );
                     return (
-                      <div
-                        key={`live-chat-message:${entry.id}`}
-                        className="rounded-2xl border border-border bg-card/80 px-4 py-3 shadow-sm"
-                      >
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                          <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                            Codex
-                          </span>
-                          <span className="text-[10px] text-muted-foreground/60">
-                            {formatTimestamp(entry.message.createdAt)}
-                          </span>
+                      <div key={`live-chat-message:${entry.id}`} className="pr-14 sm:pr-24">
+                        <div className="max-w-[78%] rounded-2xl rounded-bl-sm border border-border bg-card/80 px-4 py-3 shadow-sm">
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                              Codex
+                            </span>
+                            <span className="text-[10px] text-muted-foreground/60">
+                              {formatTimestamp(entry.message.createdAt)}
+                            </span>
+                          </div>
+                          <ChatMarkdown
+                            text={
+                              displayedAssistantText ||
+                              (entry.message.streaming ? "" : "(empty response)")
+                            }
+                            cwd={gitCwd ?? undefined}
+                            isStreaming={Boolean(entry.message.streaming)}
+                            onFileLinkActivate={onActivatePreviewableFileLink}
+                          />
+                          {entry.message.streaming ? (
+                            <p className="mt-2 text-[10px] uppercase tracking-[0.14em] text-cyan-700/80">
+                              Streaming...
+                            </p>
+                          ) : null}
                         </div>
-                        <ChatMarkdown
-                          text={
-                            entry.message.text ||
-                            (entry.message.streaming ? "" : "(empty response)")
-                          }
-                          cwd={gitCwd ?? undefined}
-                          isStreaming={Boolean(entry.message.streaming)}
-                        />
-                        {entry.message.streaming ? (
-                          <p className="mt-2 text-[10px] uppercase tracking-[0.14em] text-cyan-700/80">
-                            Streaming...
-                          </p>
-                        ) : null}
                       </div>
                     );
                   })}
@@ -5738,6 +5610,7 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onActivatePreviewableFileLink: (targetPath: string) => boolean;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   markdownCwd: string | undefined;
@@ -5792,6 +5665,7 @@ const _MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
+  onActivatePreviewableFileLink,
   isRevertingCheckpoint,
   onImageExpand,
   markdownCwd,
@@ -6087,8 +5961,8 @@ const _MessagesTimeline = memo(function MessagesTimeline({
           const userImages = row.message.attachments ?? [];
           const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
           return (
-            <div className="flex justify-end">
-              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+            <div className="flex justify-end pl-14 sm:pl-24">
+              <div className="group relative ml-auto max-w-[78%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
                 {userImages.length > 0 && (
                   <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
                     {userImages.map(
@@ -6159,7 +6033,9 @@ const _MessagesTimeline = memo(function MessagesTimeline({
       {row.kind === "message" &&
         row.message.role === "assistant" &&
         (() => {
-          const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const messageText =
+            sanitizeDisplayedAssistantMessage(row.message.text ?? "") ||
+            (row.message.streaming ? "" : "(empty response)");
           return (
             <>
               {row.showCompletionDivider && (
@@ -6171,76 +6047,79 @@ const _MessagesTimeline = memo(function MessagesTimeline({
                   <span className="h-px flex-1 bg-border" />
                 </div>
               )}
-              <div className="min-w-0 px-1 py-0.5">
-                <ChatMarkdown
-                  text={messageText}
-                  cwd={markdownCwd}
-                  isStreaming={Boolean(row.message.streaming)}
-                />
-                {(() => {
-                  const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
-                  if (!turnSummary) return null;
-                  const checkpointFiles = turnSummary.files;
-                  if (checkpointFiles.length === 0) return null;
-                  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-                  const changedFileCountLabel = String(checkpointFiles.length);
-                  const allDirectoriesExpanded =
-                    allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? true;
-                  return (
-                    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-                          <span>Changed files ({changedFileCountLabel})</span>
-                          {hasNonZeroStat(summaryStat) && (
-                            <>
-                              <span className="mx-1">•</span>
-                              <DiffStatLabel
-                                additions={summaryStat.additions}
-                                deletions={summaryStat.deletions}
-                              />
-                            </>
-                          )}
-                        </p>
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() => onToggleAllDirectories(turnSummary.turnId)}
-                          >
-                            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() =>
-                              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
-                            }
-                          >
-                            View diff
-                          </Button>
+              <div className="pr-14 sm:pr-24">
+                <div className="min-w-0 max-w-[78%] px-1 py-0.5">
+                  <ChatMarkdown
+                    text={messageText}
+                    cwd={markdownCwd}
+                    isStreaming={Boolean(row.message.streaming)}
+                    onFileLinkActivate={onActivatePreviewableFileLink}
+                  />
+                  {(() => {
+                    const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
+                    if (!turnSummary) return null;
+                    const checkpointFiles = turnSummary.files;
+                    if (checkpointFiles.length === 0) return null;
+                    const summaryStat = summarizeTurnDiffStats(checkpointFiles);
+                    const changedFileCountLabel = String(checkpointFiles.length);
+                    const allDirectoriesExpanded =
+                      allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? true;
+                    return (
+                      <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
+                            <span>Changed files ({changedFileCountLabel})</span>
+                            {hasNonZeroStat(summaryStat) && (
+                              <>
+                                <span className="mx-1">•</span>
+                                <DiffStatLabel
+                                  additions={summaryStat.additions}
+                                  deletions={summaryStat.deletions}
+                                />
+                              </>
+                            )}
+                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="outline"
+                              onClick={() => onToggleAllDirectories(turnSummary.turnId)}
+                            >
+                              {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="outline"
+                              onClick={() =>
+                                onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
+                              }
+                            >
+                              View diff
+                            </Button>
+                          </div>
                         </div>
+                        <ChangedFilesTree
+                          key={`changed-files-tree:${turnSummary.turnId}`}
+                          turnId={turnSummary.turnId}
+                          files={checkpointFiles}
+                          allDirectoriesExpanded={allDirectoriesExpanded}
+                          resolvedTheme={resolvedTheme}
+                          onOpenTurnDiff={onOpenTurnDiff}
+                        />
                       </div>
-                      <ChangedFilesTree
-                        key={`changed-files-tree:${turnSummary.turnId}`}
-                        turnId={turnSummary.turnId}
-                        files={checkpointFiles}
-                        allDirectoriesExpanded={allDirectoriesExpanded}
-                        resolvedTheme={resolvedTheme}
-                        onOpenTurnDiff={onOpenTurnDiff}
-                      />
-                    </div>
-                  );
-                })()}
-                <p className="mt-1.5 text-[10px] text-muted-foreground/30">
-                  {formatMessageMeta(
-                    row.message.createdAt,
-                    row.message.streaming
-                      ? formatElapsed(row.message.createdAt, nowIso)
-                      : formatElapsed(row.message.createdAt, row.message.completedAt),
-                  )}
-                </p>
+                    );
+                  })()}
+                  <p className="mt-1.5 text-[10px] text-muted-foreground/30">
+                    {formatMessageMeta(
+                      row.message.createdAt,
+                      row.message.streaming
+                        ? formatElapsed(row.message.createdAt, nowIso)
+                        : formatElapsed(row.message.createdAt, row.message.completedAt),
+                    )}
+                  </p>
+                </div>
               </div>
             </>
           );

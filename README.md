@@ -50,6 +50,16 @@ For real editing runs, install these locally:
 
 On Windows, Kdenlive may not be on `PATH`. If needed, point the tooling at an installed location such as `C:\Program Files\kdenlive\`.
 
+## Easy install
+
+For Windows users, the intended one-command install path is:
+
+```bash
+npx @harnessgg/studio@latest
+```
+
+That command downloads the latest signed desktop installer from GitHub Releases, runs it locally, and then checks whether the external editing tools are present. Studio still requires local installs of Codex CLI, Kdenlive, FFmpeg, Python, and `harnessgg-kdenlive` for real editing runs.
+
 ## Development
 
 Install dependencies:

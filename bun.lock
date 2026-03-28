@@ -122,6 +122,19 @@
         "vitest": "catalog:",
       },
     },
+    "packages/installer": {
+      "name": "@harnessgg/studio",
+      "version": "0.1.1",
+      "bin": {
+        "studio": "./bin/studio-install.mjs",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/shared": {
       "name": "@studio/shared",
       "version": "0.0.0-alpha.1",
@@ -321,6 +334,8 @@
     "@hapi/tlds": ["@hapi/tlds@1.1.6", "", {}, "sha512-xdi7A/4NZokvV0ewovme3aUO5kQhW9pQ2YD1hRqZGhhSi5rBv4usHYidVocXSi9eihYsznZxLtAiEYYUL6VBGw=="],
 
     "@hapi/topo": ["@hapi/topo@6.0.2", "", { "dependencies": { "@hapi/hoek": "^11.0.2" } }, "sha512-KR3rD5inZbGMrHmgPxsJ9dbi6zEK+C3ZwUwTa+eMwWLz7oijWUTWD2pMSNNYJAU6Qq+65NkxXjqHr/7LM2Xkqg=="],
+
+    "@harnessgg/studio": ["@harnessgg/studio@workspace:packages/installer"],
 
     "@img/sharp-darwin-arm64": ["@img/sharp-darwin-arm64@0.34.5", "", { "optionalDependencies": { "@img/sharp-libvips-darwin-arm64": "1.2.4" }, "os": "darwin", "cpu": "arm64" }, "sha512-imtQ3WMJXbMY4fxb/Ndp6HBTNVtWCUI0WdobyheGf5+ad6xX8VIDO8u2xE4qc/fr08CKG/7dDseFtn6M6g/r3w=="],
 

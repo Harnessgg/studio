@@ -21,6 +21,10 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { getRouter } from "../router";
 import { useStore } from "../store";
 
+vi.mock("../components/DiffWorkerPoolProvider", () => ({
+  DiffWorkerPoolProvider: ({ children }: { children?: unknown }) => children ?? null,
+}));
+
 const THREAD_ID = "thread-kb-toast-test" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
@@ -52,6 +56,7 @@ function createBaseServerConfig(): ServerConfig {
         checkedAt: NOW_ISO,
       },
     ],
+    tools: [],
     availableEditors: [],
   };
 }
@@ -203,6 +208,7 @@ function sendServerConfigUpdatedPush(issues: Array<{ kind: string; message: stri
       data: {
         issues,
         providers: fixture.serverConfig.providers,
+        tools: fixture.serverConfig.tools,
       },
     }),
   );

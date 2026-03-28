@@ -14,6 +14,7 @@ import {
   WS_METHODS,
   type WsPush,
   type ServerProviderStatus,
+  type ServerToolStatus,
 } from "@studio/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -98,6 +99,16 @@ const defaultProviders: ReadonlyArray<ServerProviderStatus> = [
     status: "ready",
     available: true,
     authStatus: "authenticated",
+    checkedAt: "2026-01-01T00:00:00.000Z",
+  },
+];
+
+const defaultTools: ReadonlyArray<ServerToolStatus> = [
+  {
+    tool: "ffmpeg",
+    label: "FFmpeg",
+    status: "ready",
+    available: true,
     checkedAt: "2026-01-01T00:00:00.000Z",
   },
 ];
@@ -198,6 +209,7 @@ describe("wsNativeApi", () => {
         },
       ],
       providers: defaultProviders,
+      tools: defaultTools,
     } as const;
     emitPush(WS_CHANNELS.serverConfigUpdated, payload);
 
@@ -220,16 +232,19 @@ describe("wsNativeApi", () => {
     emitPush(WS_CHANNELS.serverConfigUpdated, {
       issues: [{ kind: "keybindings.malformed-config", message: "bad json" }],
       providers: defaultProviders,
+      tools: defaultTools,
     });
     emitPush(WS_CHANNELS.serverConfigUpdated, {
       issues: [],
       providers: defaultProviders,
+      tools: defaultTools,
     });
 
     expect(listener).toHaveBeenCalledTimes(2);
     expect(listener).toHaveBeenLastCalledWith({
       issues: [],
       providers: defaultProviders,
+      tools: defaultTools,
     });
   });
 

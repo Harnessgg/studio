@@ -1,0 +1,32 @@
+{
+  "name": "@harnessgg/studio",
+  "version": "0.1.1",
+  "description": "Windows bootstrap installer for Studio by HarnessGG",
+  "bin": {
+    "studio": "dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts src/cli.ts --format esm --dts --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": "^24.13.1"
+  }
+}

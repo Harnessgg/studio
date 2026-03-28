@@ -289,6 +289,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   );
 
   const providerStatuses = yield* providerHealth.getStatuses;
+  const toolStatuses = yield* providerHealth.getToolStatuses;
 
   const clients = yield* Ref.make(new Set<WebSocket>());
   const logger = createLogger("ws");
@@ -775,6 +776,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     pushBus.publishAll(WS_CHANNELS.serverConfigUpdated, {
       issues: event.issues,
       providers: providerStatuses,
+      tools: toolStatuses,
     }),
   ).pipe(Effect.forkIn(subscriptionsScope));
 
@@ -1058,6 +1060,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
           providers: providerStatuses,
+          tools: toolStatuses,
           availableEditors,
         };
 

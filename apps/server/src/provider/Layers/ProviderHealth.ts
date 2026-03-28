@@ -13,8 +13,15 @@ import type {
   ServerProviderAuthStatus,
   ServerProviderStatus,
   ServerProviderStatusState,
+  ServerToolKind,
+  ServerToolStatus,
 } from "@studio/contracts";
 import { Array, Effect, Fiber, FileSystem, Layer, Option, Path, Result, Stream } from "effect";
+import {
+  getStudioDependencyProbes,
+  type StudioDependencyCandidate,
+  type StudioDependencyProbe,
+} from "@studio/shared/studioDependencies";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -34,6 +41,12 @@ export interface CommandResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly code: number;
+}
+
+interface CommandInvocation {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly shell?: boolean;
 }
 
 function nonEmptyTrimmed(value: string | undefined): string | undefined {
@@ -239,14 +252,14 @@ const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.
     (acc, chunk) => acc + new TextDecoder().decode(chunk),
   );
 
-const runCodexCommand = (args: ReadonlyArray<string>) =>
+const runCommand = ({ command, args, shell }: CommandInvocation) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const command = ChildProcess.make("codex", [...args], {
-      shell: process.platform === "win32",
+    const childProcess = ChildProcess.make(command, [...args], {
+      shell: shell ?? process.platform === "win32",
     });
 
-    const child = yield* spawner.spawn(command);
+    const child = yield* spawner.spawn(childProcess);
 
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
@@ -260,26 +273,8 @@ const runCodexCommand = (args: ReadonlyArray<string>) =>
     return { stdout, stderr, code: exitCode } satisfies CommandResult;
   }).pipe(Effect.scoped);
 
-const runClaudeCommand = (args: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const command = ChildProcess.make("claude", [...args], {
-      shell: process.platform === "win32",
-    });
-
-    const child = yield* spawner.spawn(command);
-
-    const [stdout, stderr, exitCode] = yield* Effect.all(
-      [
-        collectStreamAsString(child.stdout),
-        collectStreamAsString(child.stderr),
-        child.exitCode.pipe(Effect.map(Number)),
-      ],
-      { concurrency: "unbounded" },
-    );
-
-    return { stdout, stderr, code: exitCode } satisfies CommandResult;
-  }).pipe(Effect.scoped);
+const runCodexCommand = (args: ReadonlyArray<string>) => runCommand({ command: "codex", args });
+const runClaudeCommand = (args: ReadonlyArray<string>) => runCommand({ command: "claude", args });
 
 export function parseClaudeAuthStatusFromOutput(result: CommandResult): {
   readonly status: ServerProviderStatusState;
@@ -360,6 +355,98 @@ export function parseClaudeAuthStatusFromOutput(result: CommandResult): {
       : "Could not verify Claude Code authentication status.",
   };
 }
+
+function commandCandidateLabel(candidate: StudioDependencyCandidate): string {
+  const renderedArgs = candidate.args.join(" ").trim();
+  return renderedArgs.length > 0 ? `${candidate.command} ${renderedArgs}` : candidate.command;
+}
+
+function checkToolCandidate(candidate: StudioDependencyCandidate) {
+  return runCommand(candidate).pipe(Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
+}
+
+function isServerToolProbe(
+  probe: StudioDependencyProbe,
+): probe is StudioDependencyProbe & { readonly kind: ServerToolKind } {
+  return probe.kind !== "codex";
+}
+
+export const checkEditingToolStatuses: Effect.Effect<
+  ReadonlyArray<ServerToolStatus>,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner
+> = Effect.forEach(
+  getStudioDependencyProbes(process.platform, process.env).filter(isServerToolProbe),
+  (probe) =>
+    Effect.gen(function* () {
+      const checkedAt = new Date().toISOString();
+
+      for (const candidate of probe.candidates) {
+        const probeResult = yield* checkToolCandidate(candidate);
+        if (Result.isFailure(probeResult)) {
+          const error = probeResult.failure;
+          if (isCommandMissingCause(error)) {
+            continue;
+          }
+          return {
+            tool: probe.kind,
+            label: probe.label,
+            status: "warning" as const,
+            available: false,
+            checkedAt,
+            message:
+              error instanceof Error
+                ? `${probe.label} was found but failed to run via \`${commandCandidateLabel(candidate)}\`: ${error.message}.`
+                : `${probe.label} was found but failed to run.`,
+          } satisfies ServerToolStatus;
+        }
+
+        if (Option.isNone(probeResult.success)) {
+          return {
+            tool: probe.kind,
+            label: probe.label,
+            status: "warning" as const,
+            available: false,
+            checkedAt,
+            message: `${probe.label} was found but timed out while running \`${commandCandidateLabel(candidate)}\`.`,
+          } satisfies ServerToolStatus;
+        }
+
+        const result = probeResult.success.value;
+        if (result.code === 0) {
+          return {
+            tool: probe.kind,
+            label: probe.label,
+            status: "ready" as const,
+            available: true,
+            checkedAt,
+          } satisfies ServerToolStatus;
+        }
+
+        const detail = detailFromResult(result);
+        return {
+          tool: probe.kind,
+          label: probe.label,
+          status: "warning" as const,
+          available: false,
+          checkedAt,
+          message: detail
+            ? `${probe.label} was found but failed to run. ${detail}`
+            : `${probe.label} was found but failed to run.`,
+        } satisfies ServerToolStatus;
+      }
+
+      return {
+        tool: probe.kind,
+        label: probe.label,
+        status: "error" as const,
+        available: false,
+        checkedAt,
+        message: probe.missingMessage,
+      } satisfies ServerToolStatus;
+    }),
+  { concurrency: "unbounded" },
+);
 
 // ── Health check ────────────────────────────────────────────────────
 
@@ -589,9 +676,11 @@ export const ProviderHealthLive = Layer.effect(
     const statusesFiber = yield* Effect.all([checkCodexProviderStatus, checkClaudeProviderStatus], {
       concurrency: "unbounded",
     }).pipe(Effect.forkScoped);
+    const toolStatusesFiber = yield* checkEditingToolStatuses.pipe(Effect.forkScoped);
 
     return {
       getStatuses: Fiber.join(statusesFiber),
+      getToolStatuses: Fiber.join(toolStatusesFiber),
     } satisfies ProviderHealthShape;
   }),
 );

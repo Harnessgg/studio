@@ -242,9 +242,49 @@ jobs:
             release-assets/latest*.yml
           fail_on_unmatched_files: true
 
+  publish-installer:
+    name: Publish Installer Package
+    needs: [preflight, release]
+    if: ${{ secrets.NPM_AUTOMATION_TOKEN != '' || secrets.NPM_TOKEN != '' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Set release package versions
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/update-release-package-versions.ts "$RELEASE_VERSION"
+
+      - name: Build installer package
+        run: bunx turbo run build --filter=@harnessgg/studio
+
+      - name: Publish installer package
+        working-directory: packages/installer
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_AUTOMATION_TOKEN || secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
   finalize:
     name: Finalize release
-    needs: [preflight, release]
+    needs: [preflight, release, publish-installer]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.release.result == 'success' && (needs.publish-installer.result == 'success' || needs.publish-installer.result == 'skipped') }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -271,7 +311,7 @@ jobs:
 
       - name: Format package.json files
         if: steps.update_versions.outputs.changed == 'true'
-        run: bunx oxfmt apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
+        run: bunx oxfmt apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json packages/installer/package.json
 
       - name: Refresh lockfile
         if: steps.update_versions.outputs.changed == 'true'
@@ -283,7 +323,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
-          if git diff --quiet -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json bun.lock; then
+          if git diff --quiet -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json packages/installer/package.json bun.lock; then
             echo "No version changes to commit."
             exit 0
           fi
@@ -291,6 +331,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json bun.lock
+          git add apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json packages/installer/package.json bun.lock
           git commit -m "chore(release): prepare $RELEASE_TAG"
           git push origin HEAD:main
